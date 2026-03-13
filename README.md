@@ -122,7 +122,37 @@ npm start
 
 ## Skills
 
-The bot automatically loads user-scope skills from `~/.agents/skills` at session creation. Drop any `.yml` skill files there and they'll be available to Copilot in every conversation.
+The bot automatically loads user-scope skills from `~/.agents/skills` at session creation. The following skills are bundled in this project under `.agents/skills/` and are available to Copilot in every conversation:
+
+| Skill | Description |
+|-------|-------------|
+| `copilot-sdk` | Build agentic applications with the GitHub Copilot SDK. Covers sessions, streaming, MCP servers, and custom agents. |
+| `dependency-updater` | Smart dependency management. Auto-detects project type, applies safe updates, prompts for major version bumps. |
+| `npm-git-install` | Install npm packages directly from GitHub repositories using git URLs (private repos, branches, unreleased versions). |
+| `security-best-practices` | Web application and infrastructure security. Covers HTTPS, CORS, XSS, SQL injection, CSRF, rate limiting, and OWASP Top 10. |
+| `typescript-expert` | TypeScript and JavaScript expert covering type-level programming, performance, monorepo management, and modern tooling. |
+
+To add your own skills, drop skill YAML/Markdown files into `~/.agents/skills/` — they load automatically at session start.
+
+## Uninstall
+
+**Stop and remove the systemd service** (if installed):
+```bash
+sudo systemctl stop ai-assistant
+sudo systemctl disable ai-assistant
+sudo rm /etc/systemd/system/ai-assistant.service
+sudo systemctl daemon-reload
+```
+
+**Remove the npm package**:
+```bash
+npm uninstall -g ai-assistant
+```
+
+**Remove config and credentials** (optional — destructive):
+```bash
+rm -rf ~/.ai-assistant
+```
 
 ## Running as a Service (systemd / WSL)
 
