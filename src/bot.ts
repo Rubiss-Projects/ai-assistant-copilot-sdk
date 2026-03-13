@@ -11,7 +11,21 @@ import { handleChat } from "./handlers/slash/chat.js";
 import { handleReset } from "./handlers/slash/reset.js";
 import { handleMention } from "./handlers/mention.js";
 
+// If DISCORD_ALLOWED_USERS is set, only these Discord user IDs can use the bot.
+// NOTE: computed inside createBot() so dotenv.config() has already run in index.ts.
+
 export function createBot(sessions: SessionManager): Client {
+  const allowedUsers = new Set(
+    (process.env.DISCORD_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+  );
+  const isAllowed = (userId: string): boolean =>
+    allowedUsers.size === 0 || allowedUsers.has(userId);
+
+  // Channel ID(s) where the bot responds to every message without needing a mention
+  const freeChannels = new Set(
+    (process.env.DISCORD_FREE_CHANNELS ?? "").split(",").map((s) => s.trim()).filter(Boolean)
+  );
+
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -29,6 +43,11 @@ export function createBot(sessions: SessionManager): Client {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
+    if (!isAllowed(interaction.user.id)) {
+      await interaction.reply({ content: "⛔ You are not authorized to use this bot.", ephemeral: true });
+      return;
+    }
+
     const cmd = interaction as ChatInputCommandInteraction;
     switch (cmd.commandName) {
       case "ask":
@@ -45,14 +64,10 @@ export function createBot(sessions: SessionManager): Client {
     }
   });
 
-  // Channel ID(s) where the bot responds to every message without needing a mention
-  const freeChannels = new Set(
-    (process.env.DISCORD_FREE_CHANNELS ?? "").split(",").map((s) => s.trim()).filter(Boolean)
-  );
-
   client.on(Events.MessageCreate, async (message) => {
     if (message.author.bot) return;
     if (!client.user) return;
+    if (!isAllowed(message.author.id)) return;
 
     const isMentioned = message.mentions.has(client.user.id);
     const isFreeChannel = freeChannels.has(message.channelId);
