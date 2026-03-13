@@ -18,11 +18,6 @@ ai-assistant start
 ai-assistant install-service
 ```
 
-Pin a specific release:
-```bash
-npm install -g --install-links github:Rubiss/ai-assistant-copilot-sdk#v1.0.5
-```
-
 Update to latest:
 ```bash
 npm install -g --install-links github:Rubiss/ai-assistant-copilot-sdk
