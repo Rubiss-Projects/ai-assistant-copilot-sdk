@@ -2,6 +2,35 @@
 
 A personal Discord bot backed by the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). Chat with Copilot directly from a Discord channel — with full tool access, persistent conversation history, slash commands, and thread-based isolated sessions.
 
+## Quick Install
+
+```bash
+# Install directly from GitHub (no cloning required)
+npm install -g github:Rubiss/ai-assistant-copilot-sdk
+
+# Run the setup wizard — creates ~/.ai-assistant/.env
+ai-assistant setup
+
+# Start the bot
+ai-assistant start
+
+# Optional: install as a systemd service (auto-start on boot)
+ai-assistant install-service
+```
+
+Pin a specific release:
+```bash
+npm install -g github:Rubiss/ai-assistant-copilot-sdk#v1.0.0
+```
+
+Update to latest:
+```bash
+npm install -g github:Rubiss/ai-assistant-copilot-sdk
+# or: ai-assistant update  (prints the command)
+```
+
+> **Prerequisites**: Node.js 18+, the [`gh` CLI](https://cli.github.com/) authenticated with a GitHub account that has Copilot access.
+
 ## Features
 
 - **Thread-based chat** — `/chat` spawns a dedicated Discord thread per conversation, each with its own isolated session context
@@ -35,6 +64,10 @@ A personal Discord bot backed by the [GitHub Copilot SDK](https://github.com/git
 - **In a DM** — responds inline; the whole DM is one persistent session.
 
 ## Setup
+
+> If you used the Quick Install above, you can skip to [Invite the bot to your server](#invite-the-bot-to-your-server).
+
+### Developer Setup (clone the repo)
 
 ### 1. Prerequisites
 
@@ -100,26 +133,19 @@ The bot automatically loads user-scope skills from `~/.agents/skills` at session
 
 If you're on WSL with systemd enabled (`/etc/wsl.conf` has `systemd=true`), you can run the bot as a system service that starts automatically when WSL boots.
 
-> ⚠️ **Before installing**: `ai-assistant.service` contains a hardcoded username (`rubiss`) and absolute path (`/mnt/e/Projects/ai-assistant`). Edit these to match your system before running the install script:
->
-> ```ini
-> User=your-username
-> WorkingDirectory=/path/to/ai-assistant
-> ExecStart=/path/to/ai-assistant/node_modules/.bin/tsx src/index.ts
-> EnvironmentFile=/path/to/ai-assistant/.env
-> ```
-
-Install the service (run once):
-
+**Quick Install path** — handled automatically:
 ```bash
-sudo bash scripts/install-service.sh
+ai-assistant install-service
 ```
+
+**Developer path** (cloned repo) — the service template `ai-assistant.service` uses `%%USER%%`, `%%CONFIG_DIR%%`, `%%NODE_PATH%%`, and `%%CLI_PATH%%` placeholders. The `install-service` command patches these at install time.
 
 Useful commands after installation:
 
 ```bash
+sudo systemctl start ai-assistant        # start now
 sudo systemctl status ai-assistant       # check if running
-sudo systemctl restart ai-assistant      # restart after code changes
+sudo systemctl restart ai-assistant      # restart after update
 sudo journalctl -u ai-assistant -f       # live logs
 sudo systemctl stop ai-assistant         # stop the bot
 ```
@@ -143,10 +169,14 @@ src/
       history.ts        # /history handler
       servers.ts        # /servers handler
       leave.ts          # /leave handler
+  cli.ts                # ai-assistant CLI (setup/start/register/install-service/update)
 scripts/
   register-commands.ts  # One-time slash command registration
-  install-service.sh    # systemd service installer
-ai-assistant.service    # systemd unit file (edit before use — see above)
+  install-service.sh    # Legacy systemd installer (superseded by ai-assistant install-service)
+.github/workflows/
+  ci.yml                # Build check on push/PR
+  release.yml           # Create GitHub Release on v* tag push
+ai-assistant.service    # systemd unit template (%%PLACEHOLDER%% vars, patched by install-service)
 .env.example            # Environment variable template
 ```
 

@@ -1,9 +1,20 @@
 {
   "name": "ai-assistant",
   "version": "1.0.0",
-  "description": "",
+  "description": "Personal Discord bot backed by the GitHub Copilot SDK",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rubiss/ai-assistant-copilot-sdk.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "ai-assistant": "./dist/src/cli.js"
+  },
   "scripts": {
+    "prepare": "npm run build",
     "start": "tsx src/index.ts",
     "build": "tsc",
     "register": "tsx scripts/register-commands.ts"
