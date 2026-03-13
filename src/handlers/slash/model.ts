@@ -19,9 +19,14 @@ export async function handleModel(
       await interaction.editReply(truncateForDiscord(`**Available models:**\n${lines.join("\n")}`));
     } else if (sub === "set") {
       const modelId = interaction.options.getString("model_id", true);
+      // Use thread ID as session key when inside a thread (matches /chat thread sessions)
+      const sessionKey = interaction.channel?.isThread()
+        ? interaction.channelId
+        : interaction.user.id;
       await interaction.deferReply({ ephemeral: true });
-      await sessions.setModel(interaction.user.id, modelId);
-      await interaction.editReply(`✅ Model switched to \`${modelId}\`. Takes effect on your next message.`);
+      await sessions.setModel(sessionKey, modelId);
+      const scope = interaction.channel?.isThread() ? "for this thread" : "for your session";
+      await interaction.editReply(`✅ Model switched to \`${modelId}\` ${scope}. Takes effect on the next message.`);
     }
   } catch (err) {
     console.error(`[/model ${sub}] Error:`, err);

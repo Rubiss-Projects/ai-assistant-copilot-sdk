@@ -6,9 +6,14 @@ export async function handleReset(
   sessions: SessionManager
 ): Promise<void> {
   try {
-    await sessions.resetSession(interaction.user.id);
+    // Use thread ID as session key when inside a thread (matches /chat thread sessions)
+    const sessionKey = interaction.channel?.isThread()
+      ? interaction.channelId
+      : interaction.user.id;
+    const scope = interaction.channel?.isThread() ? "This thread's Copilot session" : "Your Copilot session";
+    await sessions.resetSession(sessionKey);
     await interaction.reply({
-      content: "✅ Your Copilot session has been reset.",
+      content: `✅ ${scope} has been reset.`,
       ephemeral: true,
     });
   } catch (err) {

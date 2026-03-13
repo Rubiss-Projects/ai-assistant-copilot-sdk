@@ -8,7 +8,11 @@ export async function handleHistory(
   try {
     await interaction.deferReply({ ephemeral: true });
 
-    const events = await sessions.getHistory(interaction.user.id);
+    // Use thread ID as session key when inside a thread (matches /chat thread sessions)
+    const sessionKey = interaction.channel?.isThread()
+      ? interaction.channelId
+      : interaction.user.id;
+    const events = await sessions.getHistory(sessionKey);
     if (!events) {
       await interaction.editReply("No active session. Start chatting first with `/chat`.");
       return;
