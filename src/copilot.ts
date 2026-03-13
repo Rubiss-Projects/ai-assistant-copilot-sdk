@@ -14,6 +14,8 @@ export class SessionManager {
   private sessions: Map<string, CopilotSession> = new Map();
   // Stores in-flight creation promises to prevent duplicate session creation (TOCTOU fix)
   private pending: Map<string, Promise<CopilotSession>> = new Map();
+  // Serializes concurrent sendMessage calls per session to prevent state corruption
+  private messageQueues: Map<string, Promise<unknown>> = new Map();
 
   constructor() {
     this.client = new CopilotClient();
@@ -54,9 +56,15 @@ export class SessionManager {
   }
 
   async sendMessage(userId: string, prompt: string): Promise<string> {
-    const session = await this.getOrCreateSession(userId);
-    const result = await session.sendAndWait({ prompt }, 5 * 60 * 1000); // 5-minute timeout
-    return result?.data?.content ?? "(no response)";
+    const tail = this.messageQueues.get(userId) ?? Promise.resolve();
+    const next = tail.then(async () => {
+      const session = await this.getOrCreateSession(userId);
+      const result = await session.sendAndWait({ prompt }, 5 * 60 * 1000); // 5-minute timeout
+      return result?.data?.content ?? "(no response)";
+    });
+    // Non-rejecting tail so errors don't permanently block the queue
+    this.messageQueues.set(userId, next.catch(() => {}));
+    return next;
   }
 
   async getStatus() {
@@ -89,6 +97,7 @@ export class SessionManager {
     const session = this.sessions.get(userId);
     this.sessions.delete(userId);
     this.pending.delete(userId);
+    this.messageQueues.delete(userId);
     if (session) {
       await session.disconnect().catch((err) =>
         console.error(`[SessionManager] Error disconnecting session for ${userId}:`, err)

@@ -4,7 +4,8 @@ import { SessionManager, truncateForDiscord } from "../copilot.js";
 export async function handleMention(
   message: Message,
   client: Client,
-  sessions: SessionManager
+  sessions: SessionManager,
+  sessionKey?: string  // defaults to message.author.id; pass channelId for thread sessions
 ): Promise<void> {
   // Strip all @mentions of the bot and trim
   const botMentionPattern = new RegExp(`<@!?${client.user!.id}>`, "g");
@@ -16,6 +17,8 @@ export async function handleMention(
     );
     return;
   }
+
+  const key = sessionKey ?? message.author.id;
 
   try {
     // Keep typing indicator alive every 8s (Discord clears it after ~10s)
@@ -31,7 +34,7 @@ export async function handleMention(
 
     let response: string;
     try {
-      response = await sessions.sendMessage(message.author.id, prompt);
+      response = await sessions.sendMessage(key, prompt);
     } finally {
       clearInterval(typingInterval);
     }

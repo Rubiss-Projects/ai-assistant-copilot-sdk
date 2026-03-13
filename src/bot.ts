@@ -89,6 +89,12 @@ export function createBot(sessions: SessionManager): Client {
     if (!client.user) return;
     if (!isAllowed(message.author.id)) return;
 
+    // Bot-owned threads: respond to every message, session keyed by thread ID
+    if (message.channel.isThread() && message.channel.ownerId === client.user.id) {
+      await handleMention(message, client, sessions, message.channelId);
+      return;
+    }
+
     const isMentioned = message.mentions.has(client.user.id);
     const isFreeChannel = freeChannels.has(message.channelId);
 
