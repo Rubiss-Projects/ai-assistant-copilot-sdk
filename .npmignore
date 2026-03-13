@@ -1,0 +1,11 @@
+# Exclude dev/source files from npm pack
+src/
+scripts/
+.github/
+*.md
+!README.md
+.env*
+tsconfig.json
+*.service
+plans/
+node_modules/
