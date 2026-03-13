@@ -5,10 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=rubiss
-WorkingDirectory=/mnt/e/Projects/ai-assistant
-EnvironmentFile=/mnt/e/Projects/ai-assistant/.env
-ExecStart=/mnt/e/Projects/ai-assistant/node_modules/.bin/tsx src/index.ts
+User=%%USER%%
+WorkingDirectory=%%CONFIG_DIR%%
+EnvironmentFile=%%CONFIG_DIR%%/.env
+ExecStart=%%NODE_PATH%% %%CLI_PATH%% start
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
