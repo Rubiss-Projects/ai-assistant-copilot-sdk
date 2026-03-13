@@ -59,6 +59,21 @@ export class SessionManager {
     return result?.data?.content ?? "(no response)";
   }
 
+  async getStatus() {
+    await this.client.start();
+    const [status, authStatus] = await Promise.all([
+      this.client.getStatus(),
+      this.client.getAuthStatus(),
+    ]);
+    return { status, authStatus };
+  }
+
+  async getHistory(userId: string) {
+    const session = this.sessions.get(userId);
+    if (!session) return null;
+    return session.getMessages();
+  }
+
   async listModels() {
     await this.client.start(); // listModels() requires an active connection; start() is idempotent
     return this.client.listModels();

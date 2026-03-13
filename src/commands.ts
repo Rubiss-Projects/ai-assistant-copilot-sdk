@@ -55,6 +55,20 @@ export const commands = [
             .setRequired(true)
         )
     ),
+  new SlashCommandBuilder()
+    .setName("status")
+    .setDescription("Show Copilot auth status and CLI version"),
+
+  new SlashCommandBuilder()
+    .setName("history")
+    .setDescription("Show your recent conversation history")
+    .addIntegerOption((opt) =>
+      opt
+        .setName("count")
+        .setDescription("Number of exchanges to show (default: 5, max: 20)")
+        .setMinValue(1)
+        .setMaxValue(20)
+    ),
 ];
 
-export type CommandName = "ask" | "chat" | "reset" | "servers" | "leave" | "model";
+export type CommandName = "ask" | "chat" | "reset" | "servers" | "leave" | "model" | "status" | "history";
