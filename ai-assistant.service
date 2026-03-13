@@ -1,0 +1,19 @@
+[Unit]
+Description=AI Assistant Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rubiss
+WorkingDirectory=/mnt/e/Projects/ai-assistant
+EnvironmentFile=/mnt/e/Projects/ai-assistant/.env
+ExecStart=/mnt/e/Projects/ai-assistant/node_modules/.bin/tsx src/index.ts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-assistant
+
+[Install]
+WantedBy=multi-user.target
