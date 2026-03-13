@@ -1,5 +1,4 @@
 import { CopilotClient, CopilotSession, approveAll } from "@github/copilot-sdk";
-import type { PermissionRequest, PermissionRequestResult } from "@github/copilot-sdk";
 
 // Truncate long responses to Discord's 2000-char limit
 export function truncateForDiscord(text: string): string {
@@ -31,16 +30,9 @@ export class SessionManager {
     const creation = this.client
       .createSession({
         model: "gpt-4o",
-        // Only approve read-only / non-destructive operations. Deny file writes,
-        // shell execution, and any other potentially harmful capabilities.
-        onPermissionRequest: (request: PermissionRequest): PermissionRequestResult => {
-          const allowed: PermissionRequest["kind"][] = ["read"];
-          if (allowed.includes(request.kind)) {
-            return { kind: "approved" };
-          }
-          console.warn(`[SessionManager] Denied permission request for kind: ${request.kind}`);
-          return { kind: "denied-by-rules", rules: [] };
-        },
+        // Approve all tool/permission requests. This bot runs on a private server;
+        // restrict access at the Discord server/channel level if needed.
+        onPermissionRequest: approveAll,
       })
       .then((session) => {
         this.sessions.set(userId, session);
