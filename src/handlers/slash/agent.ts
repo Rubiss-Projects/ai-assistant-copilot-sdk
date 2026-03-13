@@ -48,7 +48,11 @@ export async function handleAgent(
     }
   } catch (err) {
     console.error(`[/agent ${sub}] Error:`, err);
-    const msg = `❌ Failed to ${sub} agent. Please try again.`;
+    const msg =
+      sub === "list" ? "❌ Failed to list agents." :
+      sub === "current" ? "❌ Failed to get current agent." :
+      sub === "select" ? "❌ Failed to select agent." :
+      "❌ Failed to deselect agent.";
     if (interaction.deferred) await interaction.editReply(msg).catch(() => {});
     else await interaction.reply({ content: msg, ephemeral: true }).catch(() => {});
   }
