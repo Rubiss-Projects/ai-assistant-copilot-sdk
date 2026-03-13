@@ -20,6 +20,7 @@ import { handleCompact } from "./handlers/slash/compact.js";
 import { handleFleet } from "./handlers/slash/fleet.js";
 import { handlePlan } from "./handlers/slash/plan.js";
 import { handleWorkspace } from "./handlers/slash/workspace.js";
+import { handleMcp } from "./handlers/slash/mcp.js";
 import { handleMention } from "./handlers/mention.js";
 
 // If DISCORD_ALLOWED_USERS is set, only these Discord user IDs can use the bot.
@@ -102,6 +103,9 @@ export function createBot(sessions: SessionManager): Client {
         break;
       case "workspace":
         await handleWorkspace(cmd, sessions);
+        break;
+      case "mcp":
+        await handleMcp(cmd, sessions);
         break;
       default:
         console.warn(`Unknown command: ${cmd.commandName}`);

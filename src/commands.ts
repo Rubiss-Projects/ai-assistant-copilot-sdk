@@ -9,6 +9,12 @@ export const commands = [
         .setName("prompt")
         .setDescription("Your question or prompt")
         .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("workspace")
+        .setDescription("Path to a workspace directory to load .vscode/mcp.json from (e.g. /mnt/e/Docker)")
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -19,6 +25,12 @@ export const commands = [
         .setName("message")
         .setDescription("Your message")
         .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName("workspace")
+        .setDescription("Path to a workspace directory to load .vscode/mcp.json from (e.g. /mnt/e/Docker)")
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -149,6 +161,40 @@ export const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("mcp")
+    .setDescription("Manage MCP servers for your session")
+    .addSubcommand((sub) =>
+      sub.setName("list").setDescription("List all MCP servers")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("enable")
+        .setDescription("Enable an MCP server")
+        .addStringOption((opt) =>
+          opt.setName("server").setDescription("Server name to enable").setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("disable")
+        .setDescription("Disable an MCP server")
+        .addStringOption((opt) =>
+          opt.setName("server").setDescription("Server name to disable").setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("workspace")
+        .setDescription("Set the workspace directory to load .vscode/mcp.json from")
+        .addStringOption((opt) =>
+          opt
+            .setName("path")
+            .setDescription("Workspace directory path, e.g. /mnt/e/Docker")
+            .setRequired(true)
+        )
+    ),
+
+  new SlashCommandBuilder()
     .setName("workspace")
     .setDescription("Manage workspace files")
     .addSubcommand((sub) =>
@@ -189,4 +235,5 @@ export type CommandName =
   | "compact"
   | "fleet"
   | "plan"
-  | "workspace";
+  | "workspace"
+  | "mcp";
