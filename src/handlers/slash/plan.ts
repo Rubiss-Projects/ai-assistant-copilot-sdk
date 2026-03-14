@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 
 export async function handlePlan(
   interaction: ChatInputCommandInteraction,
@@ -16,9 +16,12 @@ export async function handlePlan(
       if (!result.exists) {
         await interaction.editReply("📋 No plan exists for this session.");
       } else {
-        let msg = truncateForDiscord(`📋 **Session Plan:**\n\`\`\`\n${result.content}\n\`\`\``);
-        if (result.path) msg += `\n*Stored at: ${result.path}*`;
-        await interaction.editReply(msg);
+        const planText = `📋 **Session Plan:**\n\`\`\`\n${result.content}\n\`\`\`${result.path ? `\n*Stored at: ${result.path}*` : ""}`;
+        const chunks = chunkForDiscord(planText);
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+          await interaction.followUp({ ephemeral: true, content: chunk });
+        }
       }
     } else if (sub === "update") {
       const content = interaction.options.getString("content", true);

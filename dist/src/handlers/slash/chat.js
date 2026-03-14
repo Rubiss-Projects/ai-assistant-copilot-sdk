@@ -1,5 +1,5 @@
 import { ThreadAutoArchiveDuration } from "discord.js";
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadImageAttachments } from "../../utils/downloadAttachments.js";
 export async function handleChat(interaction, sessions) {
@@ -28,7 +28,11 @@ export async function handleChat(interaction, sessions) {
             finally {
                 await cleanup?.();
             }
-            await interaction.editReply(truncateForDiscord(response));
+            const chunks = chunkForDiscord(response);
+            await interaction.editReply(chunks[0]);
+            for (const chunk of chunks.slice(1)) {
+                await interaction.followUp({ content: chunk });
+            }
         }
         catch (err) {
             console.error("[/chat DM] Error:", err);
@@ -64,7 +68,11 @@ export async function handleChat(interaction, sessions) {
                 if (workspace)
                     sessions.setSessionWorkingDir(interaction.channelId, workspace);
                 const response = await sessions.sendMessage(interaction.channelId, enrichedMessage, imagePaths);
-                await interaction.editReply(truncateForDiscord(response));
+                const chunks = chunkForDiscord(response);
+                await interaction.editReply(chunks[0]);
+                for (const chunk of chunks.slice(1)) {
+                    await interaction.followUp({ content: chunk });
+                }
                 return;
             }
             const replyMsg = await interaction.fetchReply();
@@ -78,7 +86,9 @@ export async function handleChat(interaction, sessions) {
             if (workspace)
                 sessions.setSessionWorkingDir(thread.id, workspace);
             const response = await sessions.sendMessage(thread.id, enrichedMessage, imagePaths);
-            await thread.send(truncateForDiscord(response));
+            for (const chunk of chunkForDiscord(response)) {
+                await thread.send(chunk);
+            }
             await interaction.editReply(`💬 ${thread.toString()}`);
         }
         finally {

@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, ThreadAutoArchiveDuration } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadImageAttachments } from "../../utils/downloadAttachments.js";
 
@@ -34,7 +34,11 @@ export async function handleChat(
         await cleanup?.();
       }
 
-      await interaction.editReply(truncateForDiscord(response));
+      const chunks = chunkForDiscord(response);
+      await interaction.editReply(chunks[0]);
+      for (const chunk of chunks.slice(1)) {
+        await interaction.followUp({ content: chunk });
+      }
     } catch (err) {
       console.error("[/chat DM] Error:", err);
       const isPathError = err instanceof Error && err.message.startsWith("Workspace path") || err instanceof Error && err.message === "Invalid workspace path.";
@@ -70,7 +74,11 @@ export async function handleChat(
         // Can't create a thread inside a thread — use the current thread as the session
         if (workspace) sessions.setSessionWorkingDir(interaction.channelId, workspace);
         const response = await sessions.sendMessage(interaction.channelId, enrichedMessage, imagePaths);
-        await interaction.editReply(truncateForDiscord(response));
+        const chunks = chunkForDiscord(response);
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+          await interaction.followUp({ content: chunk });
+        }
         return;
       }
 
@@ -86,7 +94,9 @@ export async function handleChat(
       // Session keyed by thread ID — fully isolated per conversation
       if (workspace) sessions.setSessionWorkingDir(thread.id, workspace);
       const response = await sessions.sendMessage(thread.id, enrichedMessage, imagePaths);
-      await thread.send(truncateForDiscord(response));
+      for (const chunk of chunkForDiscord(response)) {
+        await thread.send(chunk);
+      }
 
       await interaction.editReply(`💬 ${thread.toString()}`);
     } finally {

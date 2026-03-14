@@ -1,4 +1,4 @@
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 export async function handleAgent(interaction, sessions) {
     const sub = interaction.options.getSubcommand(true);
     const sessionKey = interaction.channel?.isThread()
@@ -13,7 +13,11 @@ export async function handleAgent(interaction, sessions) {
                 return;
             }
             const lines = agents.map((a, i) => `${i + 1}. **${a.displayName}** (\`${a.name}\`) — ${a.description}`);
-            await interaction.editReply(truncateForDiscord(`**Available agents:**\n${lines.join("\n")}`));
+            const chunks = chunkForDiscord(`**Available agents:**\n${lines.join("\n")}`);
+            await interaction.editReply(chunks[0]);
+            for (const chunk of chunks.slice(1)) {
+                await interaction.followUp({ ephemeral: true, content: chunk });
+            }
         }
         else if (sub === "current") {
             await interaction.deferReply({ ephemeral: true });

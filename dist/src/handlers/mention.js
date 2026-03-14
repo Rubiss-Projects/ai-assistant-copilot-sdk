@@ -1,4 +1,4 @@
-import { truncateForDiscord } from "../copilot.js";
+import { chunkForDiscord } from "../copilot.js";
 import { resolveMessageLinks } from "../utils/resolveMessageLinks.js";
 import { downloadImageAttachments } from "../utils/downloadAttachments.js";
 export async function handleMention(message, client, sessions, sessionKey // defaults to message.author.id; pass channelId for thread sessions
@@ -33,7 +33,11 @@ export async function handleMention(message, client, sessions, sessionKey // def
             clearInterval(typingInterval);
             await cleanup();
         }
-        await message.reply(truncateForDiscord(response));
+        const chunks = chunkForDiscord(response);
+        await message.reply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+            await message.reply(chunk);
+        }
     }
     catch (err) {
         console.error("[mention] Error:", err);

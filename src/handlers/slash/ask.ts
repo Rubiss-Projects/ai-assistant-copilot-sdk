@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadImageAttachments } from "../../utils/downloadAttachments.js";
 
@@ -39,7 +39,11 @@ export async function handleAsk(
       await sessions.resetSession(tempKey);
     }
 
-    await interaction.editReply(truncateForDiscord(response));
+    const chunks = chunkForDiscord(response);
+    await interaction.editReply(chunks[0]);
+    for (const chunk of chunks.slice(1)) {
+      await interaction.followUp({ ephemeral: true, content: chunk });
+    }
   } catch (err) {
     console.error("[/ask] Error:", err);
     const msg = "❌ Something went wrong talking to Copilot. Please try again.";

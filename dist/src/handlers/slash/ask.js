@@ -1,4 +1,4 @@
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadImageAttachments } from "../../utils/downloadAttachments.js";
 export async function handleAsk(interaction, sessions) {
@@ -32,7 +32,11 @@ export async function handleAsk(interaction, sessions) {
             // Always clean up the temp session, even on error
             await sessions.resetSession(tempKey);
         }
-        await interaction.editReply(truncateForDiscord(response));
+        const chunks = chunkForDiscord(response);
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+            await interaction.followUp({ ephemeral: true, content: chunk });
+        }
     }
     catch (err) {
         console.error("[/ask] Error:", err);

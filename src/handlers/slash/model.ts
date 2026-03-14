@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 
 export async function handleModel(
   interaction: ChatInputCommandInteraction,
@@ -16,7 +16,11 @@ export async function handleModel(
         return;
       }
       const lines = models.map((m) => `\`${m.id}\` — ${m.name}`);
-      await interaction.editReply(truncateForDiscord(`**Available models:**\n${lines.join("\n")}`));
+      const chunks = chunkForDiscord(`**Available models:**\n${lines.join("\n")}`);
+      await interaction.editReply(chunks[0]);
+      for (const chunk of chunks.slice(1)) {
+        await interaction.followUp({ ephemeral: true, content: chunk });
+      }
     } else if (sub === "set") {
       const modelId = interaction.options.getString("model_id", true);
       // Use thread ID as session key when inside a thread (matches /chat thread sessions)
