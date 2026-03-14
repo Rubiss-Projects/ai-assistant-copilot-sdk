@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction, ThreadAutoArchiveDuration } from "discord.js";
 import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 
 export async function handleChat(
   interaction: ChatInputCommandInteraction,
@@ -12,8 +13,10 @@ export async function handleChat(
   if (interaction.channel?.isDMBased()) {
     try {
       await interaction.deferReply();
+      // Resolve after defer to avoid hitting Discord's 3s interaction window
+      const enrichedMessage = await resolveMessageLinks(message, interaction.client, interaction.user.id);
       if (workspace) sessions.setSessionWorkingDir(interaction.user.id, workspace);
-      const response = await sessions.sendMessage(interaction.user.id, message);
+      const response = await sessions.sendMessage(interaction.user.id, enrichedMessage);
       await interaction.editReply(truncateForDiscord(response));
     } catch (err) {
       console.error("[/chat DM] Error:", err);
@@ -34,11 +37,13 @@ export async function handleChat(
   // If already inside a thread, reuse it instead of trying to nest threads.
   try {
     await interaction.deferReply();
+    // Resolve after defer to avoid hitting Discord's 3s interaction window
+    const enrichedMessage = await resolveMessageLinks(message, interaction.client, interaction.user.id);
 
     if (interaction.channel?.isThread()) {
       // Can't create a thread inside a thread — use the current thread as the session
       if (workspace) sessions.setSessionWorkingDir(interaction.channelId, workspace);
-      const response = await sessions.sendMessage(interaction.channelId, message);
+      const response = await sessions.sendMessage(interaction.channelId, enrichedMessage);
       await interaction.editReply(truncateForDiscord(response));
       return;
     }
@@ -54,7 +59,7 @@ export async function handleChat(
 
     // Session keyed by thread ID — fully isolated per conversation
     if (workspace) sessions.setSessionWorkingDir(thread.id, workspace);
-    const response = await sessions.sendMessage(thread.id, message);
+    const response = await sessions.sendMessage(thread.id, enrichedMessage);
     await thread.send(truncateForDiscord(response));
 
     await interaction.editReply(`💬 ${thread.toString()}`);
