@@ -1,4 +1,4 @@
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 export async function handleHistory(interaction, sessions) {
     try {
         await interaction.deferReply({ ephemeral: true });
@@ -30,7 +30,11 @@ export async function handleHistory(interaction, sessions) {
                 return `**Copilot:** ${content}`;
             }
         });
-        await interaction.editReply(truncateForDiscord(lines.join("\n\n")));
+        const chunks = chunkForDiscord(lines.join("\n\n"));
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+            await interaction.followUp({ ephemeral: true, content: chunk });
+        }
     }
     catch (err) {
         console.error("[/history] Error:", err);

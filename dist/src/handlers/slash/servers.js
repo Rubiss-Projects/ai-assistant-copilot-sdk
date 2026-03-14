@@ -1,4 +1,4 @@
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 export async function handleServers(interaction, client) {
     try {
         await interaction.deferReply({ ephemeral: true });
@@ -9,7 +9,11 @@ export async function handleServers(interaction, client) {
         }
         const lines = guilds.map((g) => `• **${g.name}** — ID: \`${g.id}\` (${g.memberCount ?? "?"} members)`);
         const body = `**Servers this bot is installed in (${guilds.size}):**\n${lines.join("\n")}`;
-        await interaction.editReply(truncateForDiscord(body));
+        const chunks = chunkForDiscord(body);
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+            await interaction.followUp({ ephemeral: true, content: chunk });
+        }
     }
     catch (err) {
         console.error("[/servers] Error:", err);

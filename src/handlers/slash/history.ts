@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 
 export async function handleHistory(
   interaction: ChatInputCommandInteraction,
@@ -44,7 +44,11 @@ export async function handleHistory(
       }
     });
 
-    await interaction.editReply(truncateForDiscord(lines.join("\n\n")));
+    const chunks = chunkForDiscord(lines.join("\n\n"));
+    await interaction.editReply(chunks[0]);
+    for (const chunk of chunks.slice(1)) {
+      await interaction.followUp({ ephemeral: true, content: chunk });
+    }
   } catch (err) {
     console.error("[/history] Error:", err);
     const msg = "❌ Failed to retrieve history. Please try again.";

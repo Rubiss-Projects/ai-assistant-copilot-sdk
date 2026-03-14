@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction, Client } from "discord.js";
-import { truncateForDiscord } from "../../copilot.js";
+import { chunkForDiscord } from "../../copilot.js";
 
 export async function handleServers(
   interaction: ChatInputCommandInteraction,
@@ -20,7 +20,11 @@ export async function handleServers(
     );
 
     const body = `**Servers this bot is installed in (${guilds.size}):**\n${lines.join("\n")}`;
-    await interaction.editReply(truncateForDiscord(body));
+    const chunks = chunkForDiscord(body);
+    await interaction.editReply(chunks[0]);
+    for (const chunk of chunks.slice(1)) {
+      await interaction.followUp({ ephemeral: true, content: chunk });
+    }
   } catch (err) {
     console.error("[/servers] Error:", err);
     const msg = "❌ Failed to list servers. Please try again.";

@@ -1,5 +1,5 @@
 import { ChatInputCommandInteraction } from "discord.js";
-import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 
 export async function handleWorkspace(
   interaction: ChatInputCommandInteraction,
@@ -18,11 +18,19 @@ export async function handleWorkspace(
         await interaction.editReply("📁 Workspace is empty.");
       } else {
         const list = files.map((f, i) => `${i + 1}. \`${f}\``).join("\n");
-        await interaction.editReply(truncateForDiscord(`📁 **Workspace files:**\n${list}`));
+        const chunks = chunkForDiscord(`📁 **Workspace files:**\n${list}`);
+        await interaction.editReply(chunks[0]);
+        for (const chunk of chunks.slice(1)) {
+          await interaction.followUp({ ephemeral: true, content: chunk });
+        }
       }
     } else if (sub === "read") {
       const content = await sessions.readWorkspaceFile(sessionKey, path);
-      await interaction.editReply(truncateForDiscord(`📄 **\`${path}\`:**\n\`\`\`\n${content}\n\`\`\``));
+      const chunks = chunkForDiscord(`📄 **\`${path}\`:**\n\`\`\`\n${content}\n\`\`\``);
+      await interaction.editReply(chunks[0]);
+      for (const chunk of chunks.slice(1)) {
+        await interaction.followUp({ ephemeral: true, content: chunk });
+      }
     } else if (sub === "create") {
       const content = interaction.options.getString("content", true);
       await sessions.createWorkspaceFile(sessionKey, path, content);
