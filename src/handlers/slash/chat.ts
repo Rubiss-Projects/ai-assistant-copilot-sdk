@@ -1,6 +1,7 @@
 import { ChatInputCommandInteraction, ThreadAutoArchiveDuration } from "discord.js";
 import { SessionManager, truncateForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
+import { downloadImageAttachments } from "../../utils/downloadAttachments.js";
 
 export async function handleChat(
   interaction: ChatInputCommandInteraction,
@@ -8,6 +9,7 @@ export async function handleChat(
 ): Promise<void> {
   const message = interaction.options.getString("message", true);
   const workspace = interaction.options.getString("workspace", false);
+  const imageAttachment = interaction.options.getAttachment("image", false);
 
   // DMs can't have threads — treat the whole DM as one persistent session
   if (interaction.channel?.isDMBased()) {
@@ -16,7 +18,22 @@ export async function handleChat(
       // Resolve after defer to avoid hitting Discord's 3s interaction window
       const enrichedMessage = await resolveMessageLinks(message, interaction.client, interaction.user.id);
       if (workspace) sessions.setSessionWorkingDir(interaction.user.id, workspace);
-      const response = await sessions.sendMessage(interaction.user.id, enrichedMessage);
+
+      let imagePaths: Array<{ path: string; displayName?: string }> | undefined;
+      let cleanup: (() => Promise<void>) | undefined;
+      if (imageAttachment) {
+        const result = await downloadImageAttachments([imageAttachment]);
+        cleanup = result.cleanup;
+        imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
+      }
+
+      let response: string;
+      try {
+        response = await sessions.sendMessage(interaction.user.id, enrichedMessage, imagePaths);
+      } finally {
+        await cleanup?.();
+      }
+
       await interaction.editReply(truncateForDiscord(response));
     } catch (err) {
       console.error("[/chat DM] Error:", err);
@@ -40,29 +57,41 @@ export async function handleChat(
     // Resolve after defer to avoid hitting Discord's 3s interaction window
     const enrichedMessage = await resolveMessageLinks(message, interaction.client, interaction.user.id);
 
-    if (interaction.channel?.isThread()) {
-      // Can't create a thread inside a thread — use the current thread as the session
-      if (workspace) sessions.setSessionWorkingDir(interaction.channelId, workspace);
-      const response = await sessions.sendMessage(interaction.channelId, enrichedMessage);
-      await interaction.editReply(truncateForDiscord(response));
-      return;
+    let imagePaths: Array<{ path: string; displayName?: string }> | undefined;
+    let cleanup: (() => Promise<void>) | undefined;
+    if (imageAttachment) {
+      const result = await downloadImageAttachments([imageAttachment]);
+      cleanup = result.cleanup;
+      imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
     }
 
-    const replyMsg = await interaction.fetchReply();
+    try {
+      if (interaction.channel?.isThread()) {
+        // Can't create a thread inside a thread — use the current thread as the session
+        if (workspace) sessions.setSessionWorkingDir(interaction.channelId, workspace);
+        const response = await sessions.sendMessage(interaction.channelId, enrichedMessage, imagePaths);
+        await interaction.editReply(truncateForDiscord(response));
+        return;
+      }
 
-    const safeName = message.replace(/[\r\n]+/g, " ");
-    const threadName = `Copilot: ${safeName.slice(0, 50)}${safeName.length > 50 ? "…" : ""}`;
-    const thread = await replyMsg.startThread({
-      name: threadName,
-      autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
-    });
+      const replyMsg = await interaction.fetchReply();
 
-    // Session keyed by thread ID — fully isolated per conversation
-    if (workspace) sessions.setSessionWorkingDir(thread.id, workspace);
-    const response = await sessions.sendMessage(thread.id, enrichedMessage);
-    await thread.send(truncateForDiscord(response));
+      const safeName = message.replace(/[\r\n]+/g, " ");
+      const threadName = `Copilot: ${safeName.slice(0, 50)}${safeName.length > 50 ? "…" : ""}`;
+      const thread = await replyMsg.startThread({
+        name: threadName,
+        autoArchiveDuration: ThreadAutoArchiveDuration.OneDay,
+      });
 
-    await interaction.editReply(`💬 ${thread.toString()}`);
+      // Session keyed by thread ID — fully isolated per conversation
+      if (workspace) sessions.setSessionWorkingDir(thread.id, workspace);
+      const response = await sessions.sendMessage(thread.id, enrichedMessage, imagePaths);
+      await thread.send(truncateForDiscord(response));
+
+      await interaction.editReply(`💬 ${thread.toString()}`);
+    } finally {
+      await cleanup?.();
+    }
   } catch (err) {
     console.error("[/chat] Error:", err);
     const isPathError = err instanceof Error && (err.message.startsWith("Workspace path") || err.message === "Invalid workspace path.");
