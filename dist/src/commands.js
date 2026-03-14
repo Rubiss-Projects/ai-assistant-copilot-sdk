@@ -10,6 +10,10 @@ export const commands = [
         .addStringOption((opt) => opt
         .setName("workspace")
         .setDescription("Path to a workspace directory to load .vscode/mcp.json from (e.g. /mnt/e/Docker)")
+        .setRequired(false))
+        .addAttachmentOption((opt) => opt
+        .setName("image")
+        .setDescription("An image for Copilot to analyze as context")
         .setRequired(false)),
     new SlashCommandBuilder()
         .setName("chat")
@@ -21,6 +25,10 @@ export const commands = [
         .addStringOption((opt) => opt
         .setName("workspace")
         .setDescription("Path to a workspace directory to load .vscode/mcp.json from (e.g. /mnt/e/Docker)")
+        .setRequired(false))
+        .addAttachmentOption((opt) => opt
+        .setName("image")
+        .setDescription("An image for Copilot to analyze as context")
         .setRequired(false)),
     new SlashCommandBuilder()
         .setName("reset")

@@ -205,11 +205,17 @@ export class SessionManager {
         this.pending.set(key, creation);
         return creation;
     }
-    async sendMessage(userId, prompt) {
+    async sendMessage(userId, prompt, imagePaths) {
         const tail = this.messageQueues.get(userId) ?? Promise.resolve();
         const next = tail.then(async () => {
             const session = await this.getOrCreateSession(userId);
-            const result = await session.sendAndWait({ prompt }, parseInt(process.env.COPILOT_TIMEOUT_MS ?? "") || 10 * 60 * 1000); // default 10-minute timeout
+            const attachments = imagePaths?.map((a) => ({
+                type: "file",
+                path: a.path,
+                ...(a.displayName ? { displayName: a.displayName } : {}),
+            }));
+            const result = await session.sendAndWait({ prompt, ...(attachments?.length ? { attachments } : {}) }, parseInt(process.env.COPILOT_TIMEOUT_MS ?? "") || 10 * 60 * 1000 // default 10-minute timeout
+            );
             return result?.data?.content ?? "(no response)";
         });
         // Non-rejecting tail so errors don't permanently block the queue
