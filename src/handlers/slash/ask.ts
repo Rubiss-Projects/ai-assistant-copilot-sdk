@@ -1,5 +1,6 @@
 import { ChatInputCommandInteraction } from "discord.js";
 import { SessionManager, truncateForDiscord } from "../../copilot.js";
+import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 
 export async function handleAsk(
   interaction: ChatInputCommandInteraction,
@@ -15,7 +16,8 @@ export async function handleAsk(
     let response: string;
     try {
       if (workspace) sessions.setSessionWorkingDir(tempKey, workspace);
-      response = await sessions.sendMessage(tempKey, prompt);
+      const enrichedPrompt = await resolveMessageLinks(prompt, interaction.client, interaction.user.id);
+      response = await sessions.sendMessage(tempKey, enrichedPrompt);
     } finally {
       // Always clean up the temp session, even on error
       await sessions.resetSession(tempKey);
