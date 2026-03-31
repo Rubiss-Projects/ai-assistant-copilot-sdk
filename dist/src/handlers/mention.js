@@ -6,13 +6,13 @@ export async function handleMention(message, client, sessions, sessionKey // def
     // Strip all @mentions of the bot and trim
     const botMentionPattern = new RegExp(`<@!?${client.user.id}>`, "g");
     const prompt = message.content.replace(botMentionPattern, "").trim();
-    if (!prompt) {
+    const { attachments: images, cleanup } = await downloadFileAttachments(message.attachments.values());
+    if (!prompt && images.length === 0) {
         await message.reply("👋 Hi! Mention me with a question or command. Use `/ask` for one-shot queries, `/chat` for persistent conversation, or `/reset` to clear your history.");
         return;
     }
     const key = sessionKey ?? message.author.id;
-    const enrichedPrompt = await resolveMessageLinks(prompt, client, message.author.id);
-    const { attachments: images, cleanup } = await downloadFileAttachments(message.attachments.values());
+    const enrichedPrompt = await resolveMessageLinks(prompt || "See the attached file(s).", client, message.author.id);
     const imagePaths = images.map((a) => ({ path: a.filePath, displayName: a.displayName }));
     try {
         // Keep typing indicator alive every 8s (Discord clears it after ~10s)
