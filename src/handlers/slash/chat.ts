@@ -1,5 +1,5 @@
-import { AttachmentBuilder, ChatInputCommandInteraction, ThreadAutoArchiveDuration } from "discord.js";
-import { SessionManager, prepareDiscordResponse } from "../../copilot.js";
+import { ChatInputCommandInteraction, ThreadAutoArchiveDuration } from "discord.js";
+import { SessionManager, chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadFileAttachments } from "../../utils/downloadAttachments.js";
 
@@ -9,7 +9,7 @@ export async function handleChat(
 ): Promise<void> {
   const message = interaction.options.getString("message", true);
   const workspace = interaction.options.getString("workspace", false);
-  const fileAttachment = interaction.options.getAttachment("file", false);
+  const imageAttachment = interaction.options.getAttachment("image", false);
 
   // DMs can't have threads — treat the whole DM as one persistent session
   if (interaction.channel?.isDMBased()) {
@@ -21,8 +21,8 @@ export async function handleChat(
 
       let imagePaths: Array<{ path: string; displayName?: string }> | undefined;
       let cleanup: (() => Promise<void>) | undefined;
-      if (fileAttachment) {
-        const result = await downloadFileAttachments([fileAttachment]);
+      if (imageAttachment) {
+        const result = await downloadFileAttachments([imageAttachment]);
         cleanup = result.cleanup;
         imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
       }
@@ -34,9 +34,8 @@ export async function handleChat(
         await cleanup?.();
       }
 
-      const { chunks, file } = prepareDiscordResponse(response);
-      const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-      await interaction.editReply({ content: chunks[0], files });
+      const chunks = chunkForDiscord(response);
+      await interaction.editReply(chunks[0]);
       for (const chunk of chunks.slice(1)) {
         await interaction.followUp({ content: chunk });
       }
@@ -64,8 +63,8 @@ export async function handleChat(
 
     let imagePaths: Array<{ path: string; displayName?: string }> | undefined;
     let cleanup: (() => Promise<void>) | undefined;
-    if (fileAttachment) {
-      const result = await downloadFileAttachments([fileAttachment]);
+    if (imageAttachment) {
+      const result = await downloadFileAttachments([imageAttachment]);
       cleanup = result.cleanup;
       imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
     }
@@ -75,9 +74,8 @@ export async function handleChat(
         // Can't create a thread inside a thread — use the current thread as the session
         if (workspace) sessions.setSessionWorkingDir(interaction.channelId, workspace);
         const response = await sessions.sendMessage(interaction.channelId, enrichedMessage, imagePaths);
-        const { chunks, file } = prepareDiscordResponse(response);
-        const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-        await interaction.editReply({ content: chunks[0], files });
+        const chunks = chunkForDiscord(response);
+        await interaction.editReply(chunks[0]);
         for (const chunk of chunks.slice(1)) {
           await interaction.followUp({ content: chunk });
         }
@@ -96,10 +94,7 @@ export async function handleChat(
       // Session keyed by thread ID — fully isolated per conversation
       if (workspace) sessions.setSessionWorkingDir(thread.id, workspace);
       const response = await sessions.sendMessage(thread.id, enrichedMessage, imagePaths);
-      const { chunks, file } = prepareDiscordResponse(response);
-      const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-      await thread.send({ content: chunks[0], files });
-      for (const chunk of chunks.slice(1)) {
+      for (const chunk of chunkForDiscord(response)) {
         await thread.send(chunk);
       }
 

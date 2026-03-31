@@ -1,5 +1,5 @@
-import { AttachmentBuilder, Message, Client } from "discord.js";
-import { SessionManager, prepareDiscordResponse } from "../copilot.js";
+import { Message, Client } from "discord.js";
+import { SessionManager, chunkForDiscord } from "../copilot.js";
 import { resolveMessageLinks } from "../utils/resolveMessageLinks.js";
 import { downloadFileAttachments } from "../utils/downloadAttachments.js";
 
@@ -45,9 +45,8 @@ export async function handleMention(
       await cleanup();
     }
 
-    const { chunks, file } = prepareDiscordResponse(response);
-    const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-    await message.reply({ content: chunks[0], files });
+    const chunks = chunkForDiscord(response);
+    await message.reply(chunks[0]);
     for (const chunk of chunks.slice(1)) {
       await message.reply(chunk);
     }

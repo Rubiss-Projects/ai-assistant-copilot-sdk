@@ -1,11 +1,11 @@
-import { AttachmentBuilder, ThreadAutoArchiveDuration } from "discord.js";
-import { prepareDiscordResponse } from "../../copilot.js";
+import { ThreadAutoArchiveDuration } from "discord.js";
+import { chunkForDiscord } from "../../copilot.js";
 import { resolveMessageLinks } from "../../utils/resolveMessageLinks.js";
 import { downloadFileAttachments } from "../../utils/downloadAttachments.js";
 export async function handleChat(interaction, sessions) {
     const message = interaction.options.getString("message", true);
     const workspace = interaction.options.getString("workspace", false);
-    const fileAttachment = interaction.options.getAttachment("file", false);
+    const imageAttachment = interaction.options.getAttachment("image", false);
     // DMs can't have threads — treat the whole DM as one persistent session
     if (interaction.channel?.isDMBased()) {
         try {
@@ -16,8 +16,8 @@ export async function handleChat(interaction, sessions) {
                 sessions.setSessionWorkingDir(interaction.user.id, workspace);
             let imagePaths;
             let cleanup;
-            if (fileAttachment) {
-                const result = await downloadFileAttachments([fileAttachment]);
+            if (imageAttachment) {
+                const result = await downloadFileAttachments([imageAttachment]);
                 cleanup = result.cleanup;
                 imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
             }
@@ -28,9 +28,8 @@ export async function handleChat(interaction, sessions) {
             finally {
                 await cleanup?.();
             }
-            const { chunks, file } = prepareDiscordResponse(response);
-            const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-            await interaction.editReply({ content: chunks[0], files });
+            const chunks = chunkForDiscord(response);
+            await interaction.editReply(chunks[0]);
             for (const chunk of chunks.slice(1)) {
                 await interaction.followUp({ content: chunk });
             }
@@ -58,8 +57,8 @@ export async function handleChat(interaction, sessions) {
         const enrichedMessage = await resolveMessageLinks(message, interaction.client, interaction.user.id);
         let imagePaths;
         let cleanup;
-        if (fileAttachment) {
-            const result = await downloadFileAttachments([fileAttachment]);
+        if (imageAttachment) {
+            const result = await downloadFileAttachments([imageAttachment]);
             cleanup = result.cleanup;
             imagePaths = result.attachments.map((a) => ({ path: a.filePath, displayName: a.displayName }));
         }
@@ -69,9 +68,8 @@ export async function handleChat(interaction, sessions) {
                 if (workspace)
                     sessions.setSessionWorkingDir(interaction.channelId, workspace);
                 const response = await sessions.sendMessage(interaction.channelId, enrichedMessage, imagePaths);
-                const { chunks, file } = prepareDiscordResponse(response);
-                const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-                await interaction.editReply({ content: chunks[0], files });
+                const chunks = chunkForDiscord(response);
+                await interaction.editReply(chunks[0]);
                 for (const chunk of chunks.slice(1)) {
                     await interaction.followUp({ content: chunk });
                 }
@@ -88,10 +86,7 @@ export async function handleChat(interaction, sessions) {
             if (workspace)
                 sessions.setSessionWorkingDir(thread.id, workspace);
             const response = await sessions.sendMessage(thread.id, enrichedMessage, imagePaths);
-            const { chunks, file } = prepareDiscordResponse(response);
-            const files = file ? [new AttachmentBuilder(file.buffer, { name: file.name })] : [];
-            await thread.send({ content: chunks[0], files });
-            for (const chunk of chunks.slice(1)) {
+            for (const chunk of chunkForDiscord(response)) {
                 await thread.send(chunk);
             }
             await interaction.editReply(`💬 ${thread.toString()}`);
