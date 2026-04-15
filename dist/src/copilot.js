@@ -335,7 +335,7 @@ export class SessionManager {
     // ── Compaction ───────────────────────────────────────────────────────────────
     async compact(key) {
         const session = await this.getOrCreateSession(key);
-        return session.rpc.compaction.compact();
+        return session.rpc.history.compact();
     }
     // ── Fleet ────────────────────────────────────────────────────────────────────
     async startFleet(key, prompt) {
