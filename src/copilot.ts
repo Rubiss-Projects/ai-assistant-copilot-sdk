@@ -385,7 +385,7 @@ export class SessionManager {
 
   async compact(key: string): Promise<{ success: boolean; tokensRemoved: number; messagesRemoved: number }> {
     const session = await this.getOrCreateSession(key);
-    return session.rpc.compaction.compact();
+    return session.rpc.history.compact();
   }
 
   // ── Fleet ────────────────────────────────────────────────────────────────────
