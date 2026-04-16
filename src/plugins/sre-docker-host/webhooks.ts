@@ -241,6 +241,62 @@ export function normalizeServarr(payload: ServarrPayload): NormalizedAlert[] {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Seerr (Overseerr / Jellyseerr)                                     */
+/* ------------------------------------------------------------------ */
+
+interface SeerrPayload {
+  notification_type: string;
+  event: string;
+  subject: string;
+  message: string;
+  image?: string;
+  media?: {
+    media_type?: string;
+    tmdbId?: string;
+    tvdbId?: string;
+    status?: string;
+    status4k?: string;
+  };
+  request?: {
+    request_id?: string;
+    requestedBy_username?: string;
+  };
+  issue?: {
+    issue_id?: string;
+    issue_type?: string;
+    issue_status?: string;
+    reportedBy_username?: string;
+  };
+}
+
+const SEERR_ALERT_TYPES = new Set(["MEDIA_FAILED"]);
+
+export function normalizeSeerr(payload: SeerrPayload): NormalizedAlert[] {
+  if (!SEERR_ALERT_TYPES.has(payload.notification_type)) return [];
+
+  const mediaId = payload.media?.tmdbId ?? payload.request?.request_id ?? "unknown";
+
+  return [
+    {
+      source: "seerr",
+      source_id: `seerr:media-failed:${mediaId}`,
+      service_name: "Seerr",
+      title: payload.subject || "Seerr media failure",
+      severity: "warning",
+      status: "firing",
+      metadata: {
+        notification_type: payload.notification_type,
+        event: payload.event,
+        message: payload.message,
+        mediaType: payload.media?.media_type,
+        tmdbId: payload.media?.tmdbId,
+        requestedBy: payload.request?.requestedBy_username,
+      },
+    },
+  ];
+}
+
+/* ------------------------------------------------------------------ */
 /*  Route factories                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -317,6 +373,31 @@ export function createServarrRoute(config: {
         (reply as { code: (n: number) => { send: (b: unknown) => void } })
           .code(200)
           .send({ received: 0, skipped: payload.eventType });
+        return;
+      }
+      for (const alert of alerts) {
+        processAlert(alert, { alertChannelId: config.alertChannelId });
+      }
+      (reply as { code: (n: number) => { send: (b: unknown) => void } })
+        .code(200)
+        .send({ received: alerts.length });
+    },
+  };
+}
+
+export function createSeerrRoute(config: {
+  alertChannelId: string;
+}): WebhookRoute {
+  return {
+    method: "POST",
+    path: "/webhooks/seerr",
+    handler: async (request: unknown, reply: unknown) => {
+      const payload = (request as { body: SeerrPayload }).body;
+      const alerts = normalizeSeerr(payload);
+      if (alerts.length === 0) {
+        (reply as { code: (n: number) => { send: (b: unknown) => void } })
+          .code(200)
+          .send({ received: 0, skipped: payload.notification_type });
         return;
       }
       for (const alert of alerts) {

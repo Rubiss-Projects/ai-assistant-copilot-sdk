@@ -15,7 +15,7 @@ import "../../app/store/migrations/v001-initial-tables.js";
 import * as incidents from "../../app/store/incidents.js";
 import * as outbox from "../../app/store/outbox.js";
 import { processAlert } from "../../worker/incidentEngine.js";
-import { normalizeAlertmanager, normalizeGrafana, normalizeInflux, normalizeServarr, mapAlertmanagerSeverity, mapGrafanaSeverity, mapInfluxSeverity, mapServarrSeverity, } from "./webhooks.js";
+import { normalizeAlertmanager, normalizeGrafana, normalizeInflux, normalizeServarr, normalizeSeerr, mapAlertmanagerSeverity, mapGrafanaSeverity, mapInfluxSeverity, mapServarrSeverity, } from "./webhooks.js";
 /* ------------------------------------------------------------------ */
 /*  Fixtures                                                           */
 /* ------------------------------------------------------------------ */
@@ -483,5 +483,98 @@ describe("Servarr severity mapping", () => {
     it("should default to info", () => {
         expect(mapServarrSeverity(0, "Info")).toBe("info");
         expect(mapServarrSeverity(undefined, undefined)).toBe("info");
+    });
+});
+/* ------------------------------------------------------------------ */
+/*  Seerr normalizer                                                   */
+/* ------------------------------------------------------------------ */
+describe("normalizeSeerr", () => {
+    beforeEach(() => {
+        const db = getDb();
+        db.exec("DELETE FROM notifications_outbox");
+        db.exec("DELETE FROM incidents");
+    });
+    const mediaFailedPayload = {
+        notification_type: "MEDIA_FAILED",
+        event: "Media Failed",
+        subject: "Failed Request - The Matrix (1999)",
+        message: "The request for The Matrix (1999) has failed.",
+        media: {
+            media_type: "movie",
+            tmdbId: "603",
+            tvdbId: "",
+            status: "UNKNOWN",
+            status4k: "UNKNOWN",
+        },
+        request: {
+            request_id: "42",
+            requestedBy_username: "rubiss",
+        },
+    };
+    it("should normalize MEDIA_FAILED to a firing alert", () => {
+        const alerts = normalizeSeerr(mediaFailedPayload);
+        expect(alerts).toHaveLength(1);
+        expect(alerts[0]).toMatchObject({
+            source: "seerr",
+            source_id: "seerr:media-failed:603",
+            service_name: "Seerr",
+            title: "Failed Request - The Matrix (1999)",
+            severity: "warning",
+            status: "firing",
+        });
+        expect(alerts[0].metadata).toMatchObject({
+            notification_type: "MEDIA_FAILED",
+            mediaType: "movie",
+            tmdbId: "603",
+            requestedBy: "rubiss",
+        });
+    });
+    it("should create an incident via processAlert", () => {
+        const alerts = normalizeSeerr(mediaFailedPayload);
+        for (const alert of alerts) {
+            processAlert(alert, { alertChannelId: "test-channel" });
+        }
+        const inc = incidents.findBySourceId("seerr", "seerr:media-failed:603");
+        expect(inc).toBeDefined();
+        expect(inc.status).toBe("open");
+        expect(inc.title).toBe("Failed Request - The Matrix (1999)");
+    });
+    it("should skip non-alert event types", () => {
+        const nonAlert = {
+            notification_type: "MEDIA_APPROVED",
+            event: "Media Approved",
+            subject: "Approved - Some Movie",
+            message: "Your request was approved.",
+        };
+        expect(normalizeSeerr(nonAlert)).toHaveLength(0);
+    });
+    it("should skip MEDIA_AVAILABLE events", () => {
+        expect(normalizeSeerr({
+            notification_type: "MEDIA_AVAILABLE",
+            event: "Media Available",
+            subject: "Available - Movie",
+            message: "Now available.",
+        })).toHaveLength(0);
+    });
+    it("should use request_id as fallback when no tmdbId", () => {
+        const noTmdb = {
+            notification_type: "MEDIA_FAILED",
+            event: "Media Failed",
+            subject: "Failed Request",
+            message: "Something failed.",
+            request: { request_id: "99" },
+        };
+        const alerts = normalizeSeerr(noTmdb);
+        expect(alerts[0].source_id).toBe("seerr:media-failed:99");
+    });
+    it("should use 'unknown' as fallback when no IDs available", () => {
+        const bare = {
+            notification_type: "MEDIA_FAILED",
+            event: "Media Failed",
+            subject: "Failed",
+            message: "Failed.",
+        };
+        const alerts = normalizeSeerr(bare);
+        expect(alerts[0].source_id).toBe("seerr:media-failed:unknown");
     });
 });

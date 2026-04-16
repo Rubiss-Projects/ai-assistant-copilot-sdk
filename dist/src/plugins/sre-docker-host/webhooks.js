@@ -145,6 +145,30 @@ export function normalizeServarr(payload) {
         },
     }));
 }
+const SEERR_ALERT_TYPES = new Set(["MEDIA_FAILED"]);
+export function normalizeSeerr(payload) {
+    if (!SEERR_ALERT_TYPES.has(payload.notification_type))
+        return [];
+    const mediaId = payload.media?.tmdbId ?? payload.request?.request_id ?? "unknown";
+    return [
+        {
+            source: "seerr",
+            source_id: `seerr:media-failed:${mediaId}`,
+            service_name: "Seerr",
+            title: payload.subject || "Seerr media failure",
+            severity: "warning",
+            status: "firing",
+            metadata: {
+                notification_type: payload.notification_type,
+                event: payload.event,
+                message: payload.message,
+                mediaType: payload.media?.media_type,
+                tmdbId: payload.media?.tmdbId,
+                requestedBy: payload.request?.requestedBy_username,
+            },
+        },
+    ];
+}
 /* ------------------------------------------------------------------ */
 /*  Route factories                                                    */
 /* ------------------------------------------------------------------ */
@@ -204,6 +228,28 @@ export function createServarrRoute(config) {
                 reply
                     .code(200)
                     .send({ received: 0, skipped: payload.eventType });
+                return;
+            }
+            for (const alert of alerts) {
+                processAlert(alert, { alertChannelId: config.alertChannelId });
+            }
+            reply
+                .code(200)
+                .send({ received: alerts.length });
+        },
+    };
+}
+export function createSeerrRoute(config) {
+    return {
+        method: "POST",
+        path: "/webhooks/seerr",
+        handler: async (request, reply) => {
+            const payload = request.body;
+            const alerts = normalizeSeerr(payload);
+            if (alerts.length === 0) {
+                reply
+                    .code(200)
+                    .send({ received: 0, skipped: payload.notification_type });
                 return;
             }
             for (const alert of alerts) {

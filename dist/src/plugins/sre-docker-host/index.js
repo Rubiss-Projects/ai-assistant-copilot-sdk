@@ -1,4 +1,4 @@
-import { createAlertmanagerRoute, createGrafanaRoute, createInfluxRoute, createServarrRoute, } from "./webhooks.js";
+import { createAlertmanagerRoute, createGrafanaRoute, createInfluxRoute, createServarrRoute, createSeerrRoute, } from "./webhooks.js";
 import { createDockerWatcher } from "./dockerWatcher.js";
 import { opsStatus, incidentCommand, reportNow, } from "./commands.js";
 import { createDailyReport, createWeeklyReport } from "./reports.js";
@@ -32,6 +32,7 @@ export const sreDockerHostPlugin = {
                 createGrafanaRoute(webhookConfig),
                 createInfluxRoute(webhookConfig),
                 createServarrRoute(webhookConfig),
+                createSeerrRoute(webhookConfig),
             ];
             this.contributions.worker.watchers = [
                 createDockerWatcher({ alertChannelId }),

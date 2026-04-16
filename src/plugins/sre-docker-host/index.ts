@@ -4,6 +4,7 @@ import {
   createGrafanaRoute,
   createInfluxRoute,
   createServarrRoute,
+  createSeerrRoute,
 } from "./webhooks.js";
 import { createDockerWatcher } from "./dockerWatcher.js";
 import {
@@ -47,6 +48,7 @@ export const sreDockerHostPlugin: Plugin = {
         createGrafanaRoute(webhookConfig),
         createInfluxRoute(webhookConfig),
         createServarrRoute(webhookConfig),
+        createSeerrRoute(webhookConfig),
       ];
 
       this.contributions.worker!.watchers = [
