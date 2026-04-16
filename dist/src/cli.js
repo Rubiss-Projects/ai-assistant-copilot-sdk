@@ -12,6 +12,7 @@ const CONFIG_DIR = process.env.AI_ASSISTANT_CONFIG_DIR
     ? resolve(process.env.AI_ASSISTANT_CONFIG_DIR)
     : resolve(homedir(), ".ai-assistant");
 const ENV_FILE = resolve(CONFIG_DIR, ".env");
+const CONFIG_FILE = resolve(CONFIG_DIR, "config.json");
 // Package root = two directories up from dist/src/cli.js
 const PACKAGE_ROOT = resolve(__dirname_local, "../..");
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -33,6 +34,16 @@ function parseEnvFile(path) {
     }
     return out;
 }
+function loadConfigFile() {
+    if (!existsSync(CONFIG_FILE))
+        return {};
+    try {
+        return JSON.parse(readFileSync(CONFIG_FILE, "utf-8"));
+    }
+    catch {
+        return {};
+    }
+}
 async function promptVar(rl, label, key, existing, required) {
     const current = existing[key] ?? "";
     // Mask sensitive values in the hint
@@ -52,6 +63,7 @@ async function setup() {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     console.log("\n🤖  AI Assistant Setup");
     console.log(`Config directory: ${CONFIG_DIR}\n`);
+    // ── Discord credentials ──
     const token = await promptVar(rl, "Discord Bot Token", "DISCORD_TOKEN", existing, true);
     const appId = await promptVar(rl, "Discord Application ID", "DISCORD_APP_ID", existing, true);
     const guildId = await promptVar(rl, "Discord Guild ID (for slash command registration)", "DISCORD_GUILD_ID", existing, true);
@@ -71,6 +83,54 @@ async function setup() {
     ];
     writeFileSync(ENV_FILE, lines.join("\n") + "\n");
     console.log(`\n✅ Config saved to ${ENV_FILE}`);
+    // ── SRE automation setup ──
+    const config = loadConfigFile();
+    const plugins = (config.plugins ?? {});
+    if (!plugins["chat-core"]) {
+        plugins["chat-core"] = { enabled: true };
+    }
+    const enableSre = await question(rl, "\nEnable SRE automation (Docker monitoring, webhooks, incident management)? [y/N] ");
+    if (enableSre.trim().toLowerCase() === "y") {
+        console.log("\n📦  SRE Automation Setup\n");
+        const defaultWorkspace = resolve(homedir(), "docker");
+        const existingSre = (plugins["sre-docker-host"] ?? {});
+        const workspaceHint = existingSre.workspacePath ?? defaultWorkspace;
+        const workspaceAnswer = await question(rl, `Workspace path (docker-compose files) [${workspaceHint}]: `);
+        const workspacePath = workspaceAnswer.trim() || workspaceHint;
+        const portHint = existingSre.webhookPort ?? 8780;
+        const portAnswer = await question(rl, `Webhook port [${portHint}]: `);
+        const webhookPort = parseInt(portAnswer.trim(), 10) || portHint;
+        const alertHint = existingSre.alertChannelId ?? "";
+        const alertAnswer = await question(rl, `Alert channel ID (Discord channel for incident notifications)${alertHint ? ` [${alertHint}]` : ""}: `);
+        const alertChannelId = alertAnswer.trim() || alertHint;
+        if (!alertChannelId) {
+            console.warn("⚠️  No alert channel ID provided — incidents won't post to Discord.");
+        }
+        const escalationHint = existingSre.escalationChannelId ?? "";
+        const escalationAnswer = await question(rl, `Escalation channel ID${escalationHint ? ` [${escalationHint}]` : ""} (optional, Enter to skip): `);
+        const escalationChannelId = escalationAnswer.trim() || escalationHint;
+        const sreConfig = {
+            enabled: true,
+            workspacePath,
+            webhookPort,
+            alertChannelId,
+        };
+        if (escalationChannelId) {
+            sreConfig.escalationChannelId = escalationChannelId;
+        }
+        plugins["sre-docker-host"] = sreConfig;
+        console.log("\n✅ SRE automation configured.");
+    }
+    else {
+        // Preserve existing sre-docker-host config if present, otherwise set disabled default
+        if (!plugins["sre-docker-host"]) {
+            plugins["sre-docker-host"] = { enabled: false };
+        }
+    }
+    config.plugins = plugins;
+    writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + "\n");
+    console.log(`✅ Plugin config saved to ${CONFIG_FILE}`);
+    // ── Register slash commands ──
     const doRegister = await question(rl, "\nRegister Discord slash commands now? [Y/n] ");
     rl.close();
     if (!doRegister.trim() || doRegister.trim().toLowerCase() === "y") {
@@ -80,7 +140,8 @@ async function setup() {
     }
     console.log("\nSetup complete! Next steps:");
     console.log("  ai-assistant start            # start the bot");
-    console.log("  ai-assistant install-service  # optional: run as a systemd service");
+    console.log("  ai-assistant start-all        # start bot + worker (SRE automation)");
+    console.log("  ai-assistant install-service  # optional: run as systemd services");
 }
 async function start() {
     if (!existsSync(ENV_FILE)) {
@@ -99,12 +160,10 @@ async function register() {
     process.chdir(CONFIG_DIR);
     await import("../scripts/register-commands.js");
 }
+async function deployCommands() {
+    return register();
+}
 async function installService() {
-    const templatePath = resolve(PACKAGE_ROOT, "ai-assistant.service");
-    if (!existsSync(templatePath)) {
-        console.error(`❌ Service template not found at ${templatePath}`);
-        process.exit(1);
-    }
     // Prefer SUDO_USER so service runs as the calling user, not as root
     const user = process.env.SUDO_USER ?? process.env.USER ?? "root";
     if (user === "root") {
@@ -112,38 +171,59 @@ async function installService() {
     }
     const nodePath = process.execPath;
     const cliPath = resolve(__dirname_local, "cli.js");
-    const patched = readFileSync(templatePath, "utf-8")
-        .replace(/%%USER%%/g, user)
-        .replace(/%%CONFIG_DIR%%/g, CONFIG_DIR)
-        .replace(/%%NODE_PATH%%/g, nodePath)
-        .replace(/%%CLI_PATH%%/g, cliPath);
-    // Write to a unique temp dir (not predictable /tmp path) to avoid TOCTOU before sudo cp
-    const tmpDir = mkdtempSync(join(tmpdir(), "ai-assistant-"));
-    const tmpPath = join(tmpDir, "ai-assistant.service");
-    writeFileSync(tmpPath, patched, { mode: 0o600 });
-    console.log("Installing /etc/systemd/system/ai-assistant.service ...");
-    const cp = spawnSync("sudo", ["cp", tmpPath, "/etc/systemd/system/ai-assistant.service"], {
-        stdio: "inherit",
-    });
-    rmSync(tmpDir, { recursive: true, force: true });
-    if (cp.status !== 0) {
-        console.error("❌ Failed to copy service file (sudo cp failed).");
-        process.exit(1);
+    const serviceFiles = [
+        { template: "ai-assistant-bot.service", dest: "ai-assistant-bot.service" },
+        { template: "ai-assistant-worker.service", dest: "ai-assistant-worker.service" },
+        { template: "ai-assistant.service", dest: "ai-assistant.service" },
+    ];
+    for (const { template, dest } of serviceFiles) {
+        const templatePath = resolve(PACKAGE_ROOT, template);
+        if (!existsSync(templatePath)) {
+            console.warn(`⚠️  Template not found: ${templatePath} — skipping ${dest}`);
+            continue;
+        }
+        const patched = readFileSync(templatePath, "utf-8")
+            .replace(/%%USER%%/g, user)
+            .replace(/%%CONFIG_DIR%%/g, CONFIG_DIR)
+            .replace(/%%NODE_PATH%%/g, nodePath)
+            .replace(/%%CLI_PATH%%/g, cliPath);
+        // Write to a unique temp dir (not predictable /tmp path) to avoid TOCTOU before sudo cp
+        const tmpDir = mkdtempSync(join(tmpdir(), "ai-assistant-"));
+        const tmpPath = join(tmpDir, dest);
+        writeFileSync(tmpPath, patched, { mode: 0o600 });
+        console.log(`Installing /etc/systemd/system/${dest} ...`);
+        const cp = spawnSync("sudo", ["cp", tmpPath, `/etc/systemd/system/${dest}`], {
+            stdio: "inherit",
+        });
+        rmSync(tmpDir, { recursive: true, force: true });
+        if (cp.status !== 0) {
+            console.error(`❌ Failed to copy ${dest} (sudo cp failed).`);
+            process.exit(1);
+        }
     }
     const reload = spawnSync("sudo", ["systemctl", "daemon-reload"], { stdio: "inherit" });
     if (reload.status !== 0) {
         console.error("❌ systemctl daemon-reload failed.");
         process.exit(1);
     }
-    const enable = spawnSync("sudo", ["systemctl", "enable", "ai-assistant"], { stdio: "inherit" });
-    if (enable.status !== 0) {
-        console.error("❌ systemctl enable failed.");
+    const enableBot = spawnSync("sudo", ["systemctl", "enable", "ai-assistant-bot"], { stdio: "inherit" });
+    if (enableBot.status !== 0) {
+        console.error("❌ systemctl enable ai-assistant-bot failed.");
         process.exit(1);
     }
-    console.log("\n✅ Service installed and enabled.");
-    console.log("  sudo systemctl start ai-assistant   # start now");
-    console.log("  sudo systemctl restart ai-assistant # restart after update");
-    console.log("  sudo journalctl -u ai-assistant -f  # view logs");
+    const enableWorker = spawnSync("sudo", ["systemctl", "enable", "ai-assistant-worker"], { stdio: "inherit" });
+    if (enableWorker.status !== 0) {
+        console.error("❌ systemctl enable ai-assistant-worker failed.");
+        process.exit(1);
+    }
+    // Also enable legacy service for backward compatibility
+    spawnSync("sudo", ["systemctl", "enable", "ai-assistant"], { stdio: "inherit" });
+    console.log("\n✅ Services installed and enabled.");
+    console.log("  sudo systemctl start ai-assistant-bot       # start bot");
+    console.log("  sudo systemctl start ai-assistant-worker    # start worker");
+    console.log("  sudo systemctl restart ai-assistant-bot     # restart after update");
+    console.log("  sudo journalctl -u ai-assistant-bot -f      # bot logs");
+    console.log("  sudo journalctl -u ai-assistant-worker -f   # worker logs");
 }
 async function startBotCmd() {
     if (!existsSync(ENV_FILE)) {
@@ -184,14 +264,15 @@ function update() {
 function help() {
     console.log("Usage: ai-assistant <command>\n");
     console.log("Commands:");
-    console.log("  setup            Interactive setup wizard — creates ~/.ai-assistant/.env");
-    console.log("  start            Start the bot (backward-compatible)");
-    console.log("  start-bot        Start the bot process");
-    console.log("  start-worker     Start the worker process");
-    console.log("  start-all        Start both bot and worker processes");
-    console.log("  register         Register Discord slash commands with the Discord API");
-    console.log("  install-service  Install and enable as a systemd service");
-    console.log("  update           Print update instructions");
+    console.log("  setup             Interactive setup wizard — creates ~/.ai-assistant/.env and config.json");
+    console.log("  start             Start the bot (backward-compatible alias for start-bot)");
+    console.log("  start-bot         Start the bot process (Discord gateway, slash commands)");
+    console.log("  start-worker      Start the worker process (webhooks, scheduler, Docker monitor)");
+    console.log("  start-all         Start both bot and worker processes");
+    console.log("  deploy-commands   Register Discord slash commands with the Discord API");
+    console.log("  register          Alias for deploy-commands");
+    console.log("  install-service   Install and enable systemd services (bot + worker)");
+    console.log("  update            Print update instructions");
     console.log("\nEnvironment:");
     console.log("  AI_ASSISTANT_CONFIG_DIR  Override config directory (default: ~/.ai-assistant)");
 }
@@ -212,6 +293,9 @@ switch (cmd) {
         break;
     case "start-all":
         await startAllCmd();
+        break;
+    case "deploy-commands":
+        await deployCommands();
         break;
     case "register":
         await register();

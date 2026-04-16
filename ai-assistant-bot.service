@@ -1,5 +1,5 @@
 [Unit]
-Description=AI Assistant Discord Bot (legacy — use ai-assistant-bot.service)
+Description=AI Assistant Discord Bot
 After=network-online.target
 Wants=network-online.target
 
@@ -14,7 +14,7 @@ RestartSec=10
 Environment=NODE_ENV=production
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=ai-assistant
+SyslogIdentifier=ai-assistant-bot
 
 [Install]
 WantedBy=multi-user.target

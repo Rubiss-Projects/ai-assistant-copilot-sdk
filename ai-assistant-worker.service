@@ -1,0 +1,20 @@
+[Unit]
+Description=AI Assistant Worker (webhooks, scheduler, Docker monitor)
+After=network-online.target ai-assistant-bot.service
+Wants=network-online.target ai-assistant-bot.service
+
+[Service]
+Type=simple
+User=%%USER%%
+WorkingDirectory=%%CONFIG_DIR%%
+EnvironmentFile=%%CONFIG_DIR%%/.env
+ExecStart=%%NODE_PATH%% %%CLI_PATH%% start-worker
+Restart=on-failure
+RestartSec=10
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ai-assistant-worker
+
+[Install]
+WantedBy=multi-user.target

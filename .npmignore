@@ -4,6 +4,7 @@
 .github/
 *.md
 !README.md
+!docs/*.md
 .env*
 tsconfig.json
 plans/
