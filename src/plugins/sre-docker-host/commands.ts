@@ -1,7 +1,7 @@
 import { SlashCommandBuilder } from "discord.js";
 import type { CommandDefinition } from "../../app/plugins/types.js";
 import * as incidents from "../../app/store/incidents.js";
-import { addTimelineEvent, getTimeline } from "../../worker/incidentEngine.js";
+import { addTimelineEvent } from "../../worker/incidentEngine.js";
 
 /* ------------------------------------------------------------------ */
 /*  /ops — operational status overview                                 */

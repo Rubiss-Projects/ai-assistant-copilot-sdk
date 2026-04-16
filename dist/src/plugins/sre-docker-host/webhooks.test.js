@@ -490,9 +490,7 @@ describe("Servarr severity mapping", () => {
 /* ------------------------------------------------------------------ */
 describe("normalizeSeerr", () => {
     beforeEach(() => {
-        const db = getDb();
-        db.exec("DELETE FROM notifications_outbox");
-        db.exec("DELETE FROM incidents");
+        cleanTables();
     });
     const mediaFailedPayload = {
         notification_type: "MEDIA_FAILED",

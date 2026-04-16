@@ -14,7 +14,7 @@ export function validateRuntimeConfig(raw) {
             throw new Error(`config.plugins["${name}"] must be an object`);
         }
         const pluginEntry = entry;
-        if (typeof pluginEntry.enabled !== "boolean") {
+        if ("enabled" in pluginEntry && typeof pluginEntry.enabled !== "boolean") {
             throw new Error(`config.plugins["${name}"].enabled must be a boolean`);
         }
     }

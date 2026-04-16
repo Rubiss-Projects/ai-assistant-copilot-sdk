@@ -19,8 +19,8 @@ export async function startBot() {
             registry.registerPlugin(plugin);
         }
     }
-    await registry.initAll({ configDir: CONFIG_DIR, processType: "bot" }, Object.fromEntries(Object.entries(config.plugins).map(([name, cfg]) => [name, cfg])));
     runMigrations();
+    await registry.initAll({ configDir: CONFIG_DIR, processType: "bot" }, Object.fromEntries(Object.entries(config.plugins).map(([name, cfg]) => [name, cfg])));
     const sessions = new SessionManager();
     const client = createBot(sessions);
     const outbox = new OutboxPublisher(client);

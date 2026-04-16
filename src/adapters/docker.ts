@@ -18,6 +18,7 @@ export interface DockerContainer {
 export interface ContainerInspect {
   Id: string;
   Name: string;
+  RestartCount?: number;
   State: {
     Status: string;
     Running: boolean;

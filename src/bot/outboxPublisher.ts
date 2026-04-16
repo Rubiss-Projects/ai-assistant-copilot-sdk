@@ -62,14 +62,13 @@ export class OutboxPublisher {
       case "alert": {
         // Already formatted as embed from incident engine — validate embeds exist
         const embeds = Array.isArray(payload.embeds) ? payload.embeds : [];
-        return { content: payload.content ?? null, embeds };
+        return { content: (payload.content as string) ?? undefined, embeds };
       }
 
       case "report": {
         const title = (payload.title as string) ?? "Report";
         const description = (payload.content as string) ?? (payload.description as string) ?? "";
         return {
-          content: null,
           embeds: [
             {
               title,
@@ -91,7 +90,6 @@ export class OutboxPublisher {
         const summaryDesc = (payload.description as string) ?? (payload.content as string) ?? "";
         const fields = Array.isArray(payload.fields) ? payload.fields : [];
         return {
-          content: null,
           embeds: [
             {
               title: summaryTitle,
@@ -108,7 +106,7 @@ export class OutboxPublisher {
         // Pass through embeds and components for interactive buttons
         const embeds = Array.isArray(payload.embeds) ? payload.embeds : [];
         const components = Array.isArray(payload.components) ? payload.components : [];
-        return { content: payload.content ?? null, embeds, components };
+        return { content: (payload.content as string) ?? undefined, embeds, components };
       }
 
       default:

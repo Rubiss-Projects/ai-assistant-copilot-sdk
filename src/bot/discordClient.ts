@@ -82,7 +82,24 @@ export function createBot(sessions: SessionManager): Client {
       await interaction.reply({ content: "⛔ You are not authorized to use this bot.", ephemeral: true });
       return;
     }
-    await router.dispatch(interaction as ChatInputCommandInteraction, context);
+    try {
+      await router.dispatch(interaction as ChatInputCommandInteraction, context);
+    } catch (error) {
+      console.error(`[Discord] Failed to dispatch command "${interaction.commandName}":`, error);
+      try {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.followUp({
+            content: "❌ An unexpected error occurred while processing this command.",
+            ephemeral: true,
+          });
+        } else {
+          await interaction.reply({
+            content: "❌ An unexpected error occurred while processing this command.",
+            ephemeral: true,
+          });
+        }
+      } catch { /* best-effort error reply */ }
+    }
   });
 
   client.on(Events.MessageCreate, async (message) => {

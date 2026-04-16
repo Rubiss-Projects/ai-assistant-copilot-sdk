@@ -23,6 +23,8 @@ export async function startWorker(): Promise<void> {
     }
   }
 
+  runMigrations();
+
   await registry.initAll(
     { configDir: CONFIG_DIR, processType: "worker" },
     Object.fromEntries(
@@ -34,9 +36,7 @@ export async function startWorker(): Promise<void> {
   console.log(`   Config dir: ${CONFIG_DIR}`);
   console.log(`   Plugins loaded: ${registry.getPluginsForProcess("worker").map(p => p.name).join(", ") || "(none)"}`);
 
-  try { logAudit({ process: "worker", event_type: "startup" }); } catch { /* db may not be ready */ }
-
-  runMigrations();
+  try { logAudit({ process: "worker", event_type: "startup" }); } catch { /* audit best-effort */ }
 
   const server = await createHttpServer();
 

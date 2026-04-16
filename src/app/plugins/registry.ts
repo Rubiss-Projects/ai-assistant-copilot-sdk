@@ -70,14 +70,17 @@ export class PluginRegistry {
     context: Omit<PluginContext, "pluginConfig">,
     pluginConfigs: Record<string, Record<string, unknown>> = {},
   ): Promise<void> {
-    for (const plugin of this.plugins.values()) {
+    const plugins = this.getPluginsForProcess(context.processType);
+    for (const plugin of plugins) {
       if (plugin.init) {
         const pluginConfig = pluginConfigs[plugin.name] ?? {};
         console.log(`[PluginRegistry] Initializing plugin: ${plugin.name}`);
         await plugin.init({ ...context, pluginConfig });
       }
     }
-    console.log(`[PluginRegistry] All plugins initialized (${this.plugins.size} total)`);
+    console.log(
+      `[PluginRegistry] All plugins initialized for ${context.processType} (${plugins.length} total)`,
+    );
   }
 
   async shutdownAll(): Promise<void> {

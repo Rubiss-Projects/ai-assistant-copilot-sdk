@@ -107,7 +107,7 @@ export async function collectDiagnostics(
       image: inspect.Config.Image,
       state: inspect.State.Status,
       health: inspect.State.Health?.Status,
-      restartCount: 0,
+      restartCount: inspect.RestartCount ?? 0,
       startedAt: inspect.State.StartedAt,
       exitCode: inspect.State.ExitCode,
     },

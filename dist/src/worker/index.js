@@ -18,6 +18,7 @@ export async function startWorker() {
             registry.registerPlugin(plugin);
         }
     }
+    runMigrations();
     await registry.initAll({ configDir: CONFIG_DIR, processType: "worker" }, Object.fromEntries(Object.entries(config.plugins).map(([name, cfg]) => [name, cfg])));
     console.log("⚙️  Worker process started.");
     console.log(`   Config dir: ${CONFIG_DIR}`);
@@ -25,8 +26,7 @@ export async function startWorker() {
     try {
         logAudit({ process: "worker", event_type: "startup" });
     }
-    catch { /* db may not be ready */ }
-    runMigrations();
+    catch { /* audit best-effort */ }
     const server = await createHttpServer();
     const scheduler = new Scheduler();
     scheduler.start();

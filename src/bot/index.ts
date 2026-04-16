@@ -24,14 +24,14 @@ export async function startBot(): Promise<void> {
     }
   }
 
+  runMigrations();
+
   await registry.initAll(
     { configDir: CONFIG_DIR, processType: "bot" },
     Object.fromEntries(
       Object.entries(config.plugins).map(([name, cfg]) => [name, cfg as Record<string, unknown>])
     )
   );
-
-  runMigrations();
 
   const sessions = new SessionManager();
   const client = createBot(sessions);
