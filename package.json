@@ -15,7 +15,12 @@
   },
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:bot": "node dist/src/cli.js start-bot",
+    "start:worker": "node dist/src/cli.js start-worker",
+    "start:all": "node dist/src/cli.js start-all",
     "build": "tsc",
+    "test": "vitest",
+    "test:run": "vitest run",
     "register": "tsx scripts/register-commands.ts",
     "postinstall": "node dist/scripts/patch-deps.cjs"
   },
@@ -24,13 +29,16 @@
   "license": "ISC",
   "dependencies": {
     "@github/copilot-sdk": "^0.2.2",
+    "better-sqlite3": "^12.9.0",
     "discord.js": "^14.26.3",
     "dotenv": "^17.4.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
   },
   "overrides": {
     "undici": "^6.24.0"

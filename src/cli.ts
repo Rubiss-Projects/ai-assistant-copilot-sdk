@@ -193,6 +193,39 @@ async function installService(): Promise<void> {
   console.log("  sudo journalctl -u ai-assistant -f  # view logs");
 }
 
+async function startBotCmd(): Promise<void> {
+  if (!existsSync(ENV_FILE)) {
+    console.error(`❌ Config not found at ${ENV_FILE}\nRun: ai-assistant setup`);
+    process.exit(1);
+  }
+  process.chdir(CONFIG_DIR);
+  const { startBot } = await import("./bot/index.js");
+  await startBot();
+}
+
+async function startWorkerCmd(): Promise<void> {
+  if (!existsSync(ENV_FILE)) {
+    console.error(`❌ Config not found at ${ENV_FILE}\nRun: ai-assistant setup`);
+    process.exit(1);
+  }
+  process.chdir(CONFIG_DIR);
+  const { startWorker } = await import("./worker/index.js");
+  await startWorker();
+}
+
+async function startAllCmd(): Promise<void> {
+  if (!existsSync(ENV_FILE)) {
+    console.error(`❌ Config not found at ${ENV_FILE}\nRun: ai-assistant setup`);
+    process.exit(1);
+  }
+  process.chdir(CONFIG_DIR);
+  const { startBot } = await import("./bot/index.js");
+  const { startWorker } = await import("./worker/index.js");
+  // Start both — worker first (no Discord gateway dependency), then bot
+  await startWorker();
+  await startBot();
+}
+
 function update(): void {
   console.log("To update to the latest version:");
   console.log("  npm install -g --install-links github:Rubiss/ai-assistant-copilot-sdk");
@@ -204,7 +237,10 @@ function help(): void {
   console.log("Usage: ai-assistant <command>\n");
   console.log("Commands:");
   console.log("  setup            Interactive setup wizard — creates ~/.ai-assistant/.env");
-  console.log("  start            Start the bot");
+  console.log("  start            Start the bot (backward-compatible)");
+  console.log("  start-bot        Start the bot process");
+  console.log("  start-worker     Start the worker process");
+  console.log("  start-all        Start both bot and worker processes");
   console.log("  register         Register Discord slash commands with the Discord API");
   console.log("  install-service  Install and enable as a systemd service");
   console.log("  update           Print update instructions");
@@ -222,6 +258,15 @@ switch (cmd) {
     break;
   case "start":
     await start();
+    break;
+  case "start-bot":
+    await startBotCmd();
+    break;
+  case "start-worker":
+    await startWorkerCmd();
+    break;
+  case "start-all":
+    await startAllCmd();
     break;
   case "register":
     await register();
