@@ -23,6 +23,7 @@ import {
   normalizeInflux,
   normalizeServarr,
   normalizeSeerr,
+  normalizeUptimeKuma,
   mapAlertmanagerSeverity,
   mapGrafanaSeverity,
   mapInfluxSeverity,
@@ -658,5 +659,141 @@ describe("normalizeSeerr", () => {
     };
     const alerts = normalizeSeerr(bare);
     expect(alerts[0].source_id).toBe("seerr:media-failed:unknown");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Uptime Kuma normalizer                                             */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeUptimeKuma", () => {
+  beforeEach(() => {
+    cleanTables();
+  });
+
+  const downPayload = {
+    heartbeat: {
+      status: 0,
+      msg: "Connection failed",
+      time: "2024-06-01T12:00:00.000Z",
+      ping: undefined as number | undefined,
+      duration: 300,
+      important: true,
+    },
+    monitor: {
+      id: 7,
+      name: "Plex",
+      url: "http://plex:32400/web",
+      type: "http",
+    },
+    msg: "Plex is DOWN",
+  };
+
+  const upPayload = {
+    heartbeat: {
+      status: 1,
+      msg: "200 - OK",
+      time: "2024-06-01T12:05:00.000Z",
+      ping: 42,
+      duration: 300,
+      important: true,
+    },
+    monitor: {
+      id: 7,
+      name: "Plex",
+      url: "http://plex:32400/web",
+      type: "http",
+    },
+    msg: "Plex is UP",
+  };
+
+  it("should normalize DOWN heartbeat to a critical firing alert", () => {
+    const alerts = normalizeUptimeKuma(downPayload);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      source: "uptime-kuma",
+      source_id: "uptime-kuma:7",
+      service_name: "Plex",
+      title: "Plex is DOWN",
+      severity: "critical",
+      status: "firing",
+    });
+    expect(alerts[0].metadata).toMatchObject({
+      monitorId: 7,
+      monitorUrl: "http://plex:32400/web",
+      monitorType: "http",
+      message: "Connection failed",
+      duration: 300,
+    });
+  });
+
+  it("should normalize UP heartbeat to a resolved info alert", () => {
+    const alerts = normalizeUptimeKuma(upPayload);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      source: "uptime-kuma",
+      source_id: "uptime-kuma:7",
+      service_name: "Plex",
+      title: "Plex is back UP",
+      severity: "info",
+      status: "resolved",
+    });
+  });
+
+  it("should create an incident via processAlert", () => {
+    const alerts = normalizeUptimeKuma(downPayload);
+    for (const alert of alerts) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const inc = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(inc).toBeDefined();
+    expect(inc!.status).toBe("open");
+    expect(inc!.title).toBe("Plex is DOWN");
+  });
+
+  it("should resolve incident when UP heartbeat arrives", () => {
+    // First create the incident
+    for (const alert of normalizeUptimeKuma(downPayload)) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const inc = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(inc!.status).toBe("open");
+
+    // Now resolve it
+    for (const alert of normalizeUptimeKuma(upPayload)) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const resolved = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(resolved!.status).toBe("resolved");
+  });
+
+  it("should skip PENDING status (status=2)", () => {
+    const pending = {
+      heartbeat: { status: 2, msg: "Pending", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 7, name: "Plex" },
+    };
+    expect(normalizeUptimeKuma(pending)).toHaveLength(0);
+  });
+
+  it("should skip MAINTENANCE status (status=3)", () => {
+    const maint = {
+      heartbeat: { status: 3, msg: "Maintenance", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 7, name: "Plex" },
+    };
+    expect(normalizeUptimeKuma(maint)).toHaveLength(0);
+  });
+
+  it("should skip payloads with missing heartbeat or monitor", () => {
+    expect(normalizeUptimeKuma({ msg: "test" })).toHaveLength(0);
+    expect(normalizeUptimeKuma({ heartbeat: { status: 0, msg: "down", time: "now" } } as any)).toHaveLength(0);
+    expect(normalizeUptimeKuma({ monitor: { id: 1, name: "X" } } as any)).toHaveLength(0);
+  });
+
+  it("should use monitor.id for dedup source_id", () => {
+    const alerts = normalizeUptimeKuma({
+      heartbeat: { status: 0, msg: "down", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 42, name: "Sonarr" },
+    });
+    expect(alerts[0].source_id).toBe("uptime-kuma:42");
   });
 });

@@ -297,6 +297,73 @@ export function normalizeSeerr(payload: SeerrPayload): NormalizedAlert[] {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Uptime Kuma                                                        */
+/* ------------------------------------------------------------------ */
+
+interface UptimeKumaHeartbeat {
+  status: number; // 0 = DOWN, 1 = UP, 2 = PENDING, 3 = MAINTENANCE
+  msg: string;
+  time: string;
+  ping?: number;
+  duration?: number;
+  important?: boolean;
+}
+
+interface UptimeKumaMonitor {
+  id: number;
+  name: string;
+  url?: string;
+  type?: string;
+  hostname?: string;
+  port?: number;
+  description?: string;
+  tags?: string[];
+}
+
+interface UptimeKumaPayload {
+  heartbeat?: UptimeKumaHeartbeat;
+  monitor?: UptimeKumaMonitor;
+  msg?: string;
+}
+
+const UPTIME_KUMA_STATUS_DOWN = 0;
+const UPTIME_KUMA_STATUS_UP = 1;
+
+export function normalizeUptimeKuma(payload: UptimeKumaPayload): NormalizedAlert[] {
+  const hb = payload.heartbeat;
+  const mon = payload.monitor;
+  if (!hb || !mon) return [];
+
+  const isDown = hb.status === UPTIME_KUMA_STATUS_DOWN;
+  const isUp = hb.status === UPTIME_KUMA_STATUS_UP;
+
+  // Only process DOWN and UP events (skip PENDING/MAINTENANCE)
+  if (!isDown && !isUp) return [];
+
+  return [
+    {
+      source: "uptime-kuma",
+      source_id: `uptime-kuma:${mon.id}`,
+      service_name: mon.name,
+      title: isDown
+        ? `${mon.name} is DOWN`
+        : `${mon.name} is back UP`,
+      severity: isDown ? "critical" : "info",
+      status: isDown ? "firing" : "resolved",
+      metadata: {
+        monitorId: mon.id,
+        monitorUrl: mon.url,
+        monitorType: mon.type,
+        message: hb.msg,
+        ping: hb.ping,
+        duration: hb.duration,
+        time: hb.time,
+      },
+    },
+  ];
+}
+
+/* ------------------------------------------------------------------ */
 /*  Route factories                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -398,6 +465,31 @@ export function createSeerrRoute(config: {
         (reply as { code: (n: number) => { send: (b: unknown) => void } })
           .code(200)
           .send({ received: 0, skipped: payload.notification_type });
+        return;
+      }
+      for (const alert of alerts) {
+        processAlert(alert, { alertChannelId: config.alertChannelId });
+      }
+      (reply as { code: (n: number) => { send: (b: unknown) => void } })
+        .code(200)
+        .send({ received: alerts.length });
+    },
+  };
+}
+
+export function createUptimeKumaRoute(config: {
+  alertChannelId: string;
+}): WebhookRoute {
+  return {
+    method: "POST",
+    path: "/webhooks/uptime-kuma",
+    handler: async (request: unknown, reply: unknown) => {
+      const payload = (request as { body: UptimeKumaPayload }).body;
+      const alerts = normalizeUptimeKuma(payload);
+      if (alerts.length === 0) {
+        (reply as { code: (n: number) => { send: (b: unknown) => void } })
+          .code(200)
+          .send({ received: 0, skipped: "non-alert-status" });
         return;
       }
       for (const alert of alerts) {

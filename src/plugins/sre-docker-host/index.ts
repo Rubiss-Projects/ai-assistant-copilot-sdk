@@ -5,6 +5,7 @@ import {
   createInfluxRoute,
   createServarrRoute,
   createSeerrRoute,
+  createUptimeKumaRoute,
 } from "./webhooks.js";
 import { createDockerWatcher } from "./dockerWatcher.js";
 import {
@@ -49,6 +50,7 @@ export const sreDockerHostPlugin: Plugin = {
         createInfluxRoute(webhookConfig),
         createServarrRoute(webhookConfig),
         createSeerrRoute(webhookConfig),
+        createUptimeKumaRoute(webhookConfig),
       ];
 
       this.contributions.worker!.watchers = [
