@@ -4,6 +4,9 @@ import { registry } from "../app/plugins/registry.js";
 import { CONFIG_DIR } from "../app/config/env.js";
 import { SessionManager } from "../app/copilot/interactiveSessions.js";
 import { createBot } from "./discordClient.js";
+import { OutboxPublisher } from "./outboxPublisher.js";
+import { runMigrations } from "../app/store/index.js";
+import { closeDb } from "../app/store/db.js";
 import { chatCorePlugin } from "../plugins/chat-core/index.js";
 import { sreDockerHostPlugin } from "../plugins/sre-docker-host/index.js";
 
@@ -28,12 +31,17 @@ export async function startBot(): Promise<void> {
     )
   );
 
+  runMigrations();
+
   const sessions = new SessionManager();
   const client = createBot(sessions);
+
+  const outbox = new OutboxPublisher(client);
 
   async function shutdown(signal: string): Promise<void> {
     console.log(`\n${signal} received — shutting down bot...`);
     try {
+      outbox.stop();
       client.destroy();
       await registry.shutdownAll();
       await sessions.shutdown();
@@ -41,6 +49,7 @@ export async function startBot(): Promise<void> {
     } catch (err) {
       console.error("Error during bot shutdown:", err);
     }
+    closeDb();
     process.exit(0);
   }
 
@@ -48,5 +57,6 @@ export async function startBot(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   await client.login(token);
+  outbox.start();
   console.log("🤖 Bot process started.");
 }
