@@ -1,0 +1,799 @@
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+
+// Mock the DB so incidentEngine (and all store modules) use in-memory SQLite
+vi.mock("../../app/store/db.js", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  return {
+    getDb: () => db,
+    closeDb: () => {},
+  };
+});
+
+import { getDb } from "../../app/store/db.js";
+import { runMigrations } from "../../app/store/migrations.js";
+import "../../app/store/migrations/v001-initial-tables.js";
+import * as incidents from "../../app/store/incidents.js";
+import * as outbox from "../../app/store/outbox.js";
+import { processAlert } from "../../worker/incidentEngine.js";
+import {
+  normalizeAlertmanager,
+  normalizeGrafana,
+  normalizeInflux,
+  normalizeServarr,
+  normalizeSeerr,
+  normalizeUptimeKuma,
+  mapAlertmanagerSeverity,
+  mapGrafanaSeverity,
+  mapInfluxSeverity,
+  mapServarrSeverity,
+} from "./webhooks.js";
+
+/* ------------------------------------------------------------------ */
+/*  Fixtures                                                           */
+/* ------------------------------------------------------------------ */
+
+const alertmanagerFiring = {
+  version: "4",
+  groupKey: '{}:{alertname="HighMemory"}',
+  status: "firing" as const,
+  alerts: [
+    {
+      status: "firing" as const,
+      labels: {
+        alertname: "HighMemory",
+        service: "nginx",
+        severity: "critical",
+        instance: "nginx:80",
+      },
+      annotations: {
+        summary: "High memory usage on nginx",
+        description: "Memory usage is above 90%",
+      },
+      startsAt: "2024-01-15T10:00:00Z",
+      endsAt: "0001-01-01T00:00:00Z",
+      fingerprint: "abc123",
+    },
+  ],
+};
+
+const alertmanagerResolved = {
+  version: "4",
+  groupKey: '{}:{alertname="HighMemory"}',
+  status: "resolved" as const,
+  alerts: [
+    {
+      status: "resolved" as const,
+      labels: {
+        alertname: "HighMemory",
+        service: "nginx",
+        severity: "critical",
+      },
+      annotations: { summary: "High memory usage on nginx" },
+      startsAt: "2024-01-15T10:00:00Z",
+      endsAt: "2024-01-15T10:30:00Z",
+      fingerprint: "abc123",
+    },
+  ],
+};
+
+const grafanaAlerting = {
+  status: "alerting" as const,
+  alerts: [
+    {
+      status: "firing" as const,
+      labels: { alertname: "HighCPU", grafana_folder: "Infrastructure" },
+      annotations: {
+        summary: "CPU usage above 80%",
+        description: "Server CPU is high",
+      },
+      fingerprint: "def456",
+      startsAt: "2024-01-15T10:00:00Z",
+      endsAt: "0001-01-01T00:00:00Z",
+      values: { B: 85.5 },
+    },
+  ],
+};
+
+const influxNotification = {
+  _check_id: "check-001",
+  _check_name: "Disk Usage",
+  _level: "crit" as const,
+  _message: "Disk usage on /data is above 95%",
+  _source_measurement: "disk",
+  _type: "threshold",
+};
+
+/* ------------------------------------------------------------------ */
+/*  Setup                                                              */
+/* ------------------------------------------------------------------ */
+
+beforeAll(() => {
+  runMigrations();
+});
+
+afterAll(() => {
+  getDb().close();
+});
+
+function cleanTables() {
+  const db = getDb();
+  for (const table of [
+    "incident_events",
+    "approval_decisions",
+    "operator_commands",
+    "notifications_outbox",
+    "incidents",
+    "plugin_state",
+    "schedule_runs",
+    "audit_events",
+    "idempotency_keys",
+  ]) {
+    db.prepare(`DELETE FROM ${table}`).run();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Alertmanager normalizer                                            */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeAlertmanager", () => {
+  it("should parse firing payload into correct NormalizedAlert", () => {
+    const alerts = normalizeAlertmanager(alertmanagerFiring);
+    expect(alerts).toHaveLength(1);
+
+    const alert = alerts[0];
+    expect(alert.source).toBe("alertmanager");
+    expect(alert.source_id).toBe("alertmanager:abc123");
+    expect(alert.service_name).toBe("nginx");
+    expect(alert.title).toBe("High memory usage on nginx");
+    expect(alert.severity).toBe("critical");
+    expect(alert.status).toBe("firing");
+    expect(alert.metadata).toMatchObject({
+      labels: alertmanagerFiring.alerts[0].labels,
+      annotations: alertmanagerFiring.alerts[0].annotations,
+      startsAt: "2024-01-15T10:00:00Z",
+    });
+  });
+
+  it("should parse resolved payload with status = resolved", () => {
+    const alerts = normalizeAlertmanager(alertmanagerResolved);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].status).toBe("resolved");
+    expect(alerts[0].source_id).toBe("alertmanager:abc123");
+  });
+
+  it("should handle missing optional fields gracefully", () => {
+    const minimal = {
+      version: "4",
+      groupKey: "{}:{}",
+      status: "firing" as const,
+      alerts: [
+        {
+          status: "firing" as const,
+          labels: { alertname: "TestAlert" },
+          annotations: {},
+          startsAt: "2024-01-15T10:00:00Z",
+          endsAt: "0001-01-01T00:00:00Z",
+          fingerprint: "min123",
+        },
+      ],
+    };
+
+    const alerts = normalizeAlertmanager(minimal);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].source_id).toBe("alertmanager:min123");
+    // No service/job/instance → undefined
+    expect(alerts[0].service_name).toBeUndefined();
+    // No summary → falls back to alertname
+    expect(alerts[0].title).toBe("TestAlert");
+    // No severity label → defaults to info
+    expect(alerts[0].severity).toBe("info");
+  });
+
+  it("should fall back to 'Alertmanager Alert' when no summary or alertname", () => {
+    const bare = {
+      version: "4",
+      groupKey: "{}:{}",
+      status: "firing" as const,
+      alerts: [
+        {
+          status: "firing" as const,
+          labels: {},
+          annotations: {},
+          startsAt: "2024-01-15T10:00:00Z",
+          endsAt: "0001-01-01T00:00:00Z",
+          fingerprint: "bare123",
+        },
+      ],
+    };
+    const alerts = normalizeAlertmanager(bare);
+    expect(alerts[0].title).toBe("Alertmanager Alert");
+  });
+});
+
+describe("mapAlertmanagerSeverity", () => {
+  it("should map critical → critical", () => {
+    expect(mapAlertmanagerSeverity("critical")).toBe("critical");
+  });
+  it("should map error → critical", () => {
+    expect(mapAlertmanagerSeverity("error")).toBe("critical");
+  });
+  it("should map warning → warning", () => {
+    expect(mapAlertmanagerSeverity("warning")).toBe("warning");
+  });
+  it("should map unknown/undefined → info", () => {
+    expect(mapAlertmanagerSeverity(undefined)).toBe("info");
+    expect(mapAlertmanagerSeverity("other")).toBe("info");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Grafana normalizer                                                 */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeGrafana", () => {
+  it("should parse alerting payload into correct NormalizedAlert", () => {
+    const alerts = normalizeGrafana(grafanaAlerting);
+    expect(alerts).toHaveLength(1);
+
+    const alert = alerts[0];
+    expect(alert.source).toBe("grafana");
+    expect(alert.source_id).toBe("grafana:def456");
+    // No `service` label, falls back to grafana_folder
+    expect(alert.service_name).toBe("Infrastructure");
+    expect(alert.title).toBe("CPU usage above 80%");
+    expect(alert.status).toBe("firing");
+    expect(alert.metadata).toMatchObject({
+      values: { B: 85.5 },
+    });
+  });
+
+  it("should prefer service label over grafana_folder", () => {
+    const withService = {
+      ...grafanaAlerting,
+      alerts: [
+        {
+          ...grafanaAlerting.alerts[0],
+          labels: {
+            ...grafanaAlerting.alerts[0].labels,
+            service: "api-gateway",
+          },
+        },
+      ],
+    };
+    const alerts = normalizeGrafana(withService);
+    expect(alerts[0].service_name).toBe("api-gateway");
+  });
+});
+
+describe("mapGrafanaSeverity", () => {
+  it("should map critical → critical", () => {
+    expect(mapGrafanaSeverity("critical")).toBe("critical");
+  });
+  it("should map error → critical", () => {
+    expect(mapGrafanaSeverity("error")).toBe("critical");
+  });
+  it("should map warning → warning", () => {
+    expect(mapGrafanaSeverity("warning")).toBe("warning");
+  });
+  it("should map unknown/undefined → info", () => {
+    expect(mapGrafanaSeverity(undefined)).toBe("info");
+    expect(mapGrafanaSeverity("something")).toBe("info");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  InfluxDB normalizer                                                */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeInflux", () => {
+  it("should parse notification into correct NormalizedAlert", () => {
+    const alerts = normalizeInflux(influxNotification);
+    expect(alerts).toHaveLength(1);
+
+    const alert = alerts[0];
+    expect(alert.source).toBe("influxdb");
+    expect(alert.source_id).toBe("influxdb:check-001");
+    expect(alert.service_name).toBe("disk");
+    expect(alert.title).toBe("Disk usage on /data is above 95%");
+    expect(alert.severity).toBe("critical");
+    expect(alert.status).toBe("firing");
+    expect(alert.metadata).toMatchObject({
+      checkId: "check-001",
+      checkName: "Disk Usage",
+      level: "crit",
+      type: "threshold",
+      sourceMeasurement: "disk",
+    });
+  });
+
+  it("should map ok level → resolved status", () => {
+    const okPayload = { ...influxNotification, _level: "ok" as const };
+    const alerts = normalizeInflux(okPayload);
+    expect(alerts[0].status).toBe("resolved");
+    expect(alerts[0].severity).toBe("info");
+  });
+
+  it("should fall back to _check_name when _message is empty", () => {
+    const noMsg = { ...influxNotification, _message: "" };
+    const alerts = normalizeInflux(noMsg);
+    expect(alerts[0].title).toBe("Disk Usage");
+  });
+});
+
+describe("mapInfluxSeverity", () => {
+  it("should map crit → critical", () => {
+    expect(mapInfluxSeverity("crit")).toBe("critical");
+  });
+  it("should map warn → warning", () => {
+    expect(mapInfluxSeverity("warn")).toBe("warning");
+  });
+  it("should map info → info", () => {
+    expect(mapInfluxSeverity("info")).toBe("info");
+  });
+  it("should map ok → info", () => {
+    expect(mapInfluxSeverity("ok")).toBe("info");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Integration: webhook → incident → outbox                           */
+/* ------------------------------------------------------------------ */
+
+describe("webhook → incident engine integration", () => {
+  beforeEach(() => cleanTables());
+
+  it("should create incident and outbox message from alertmanager alert", () => {
+    const alerts = normalizeAlertmanager(alertmanagerFiring);
+    const result = processAlert(alerts[0], { alertChannelId: "ch-alerts" });
+
+    expect(result.created).toBe(true);
+
+    // Incident was persisted
+    const incident = incidents.getIncident(result.incidentId);
+    expect(incident).not.toBeNull();
+    expect(incident!.source).toBe("alertmanager");
+    expect(incident!.source_id).toBe("alertmanager:abc123");
+    expect(incident!.service_name).toBe("nginx");
+    expect(incident!.severity).toBe("critical");
+    expect(incident!.status).toBe("open");
+
+    // Outbox message was inserted
+    const messages = outbox.claimPending(10);
+    expect(messages.length).toBeGreaterThanOrEqual(1);
+    const alertMsg = messages.find((m) => m.message_type === "alert");
+    expect(alertMsg).toBeDefined();
+    expect(alertMsg!.channel_id).toBe("ch-alerts");
+  });
+
+  it("should deduplicate a repeated firing alert", () => {
+    const alerts = normalizeAlertmanager(alertmanagerFiring);
+    const first = processAlert(alerts[0], { alertChannelId: "ch-alerts" });
+    const second = processAlert(alerts[0], { alertChannelId: "ch-alerts" });
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.incidentId).toBe(first.incidentId);
+  });
+
+  it("should resolve an existing incident from a resolved alert", () => {
+    // First, fire the alert to create the incident
+    const firingAlerts = normalizeAlertmanager(alertmanagerFiring);
+    const { incidentId } = processAlert(firingAlerts[0], {
+      alertChannelId: "ch-alerts",
+    });
+
+    // Then send the resolved version
+    const resolvedAlerts = normalizeAlertmanager(alertmanagerResolved);
+    const result = processAlert(resolvedAlerts[0], {
+      alertChannelId: "ch-alerts",
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.incidentId).toBe(incidentId);
+
+    const incident = incidents.getIncident(incidentId);
+    expect(incident!.status).toBe("resolved");
+    expect(incident!.resolved_at).not.toBeNull();
+  });
+
+  it("should create incident from Grafana alert and insert outbox message", () => {
+    const alerts = normalizeGrafana(grafanaAlerting);
+    const result = processAlert(alerts[0], { alertChannelId: "ch-grafana" });
+
+    expect(result.created).toBe(true);
+
+    const incident = incidents.getIncident(result.incidentId);
+    expect(incident!.source).toBe("grafana");
+    expect(incident!.service_name).toBe("Infrastructure");
+
+    const messages = outbox.claimPending(10);
+    expect(messages.some((m) => m.channel_id === "ch-grafana")).toBe(true);
+  });
+
+  it("should create incident from InfluxDB alert and insert outbox message", () => {
+    const alerts = normalizeInflux(influxNotification);
+    const result = processAlert(alerts[0], { alertChannelId: "ch-influx" });
+
+    expect(result.created).toBe(true);
+
+    const incident = incidents.getIncident(result.incidentId);
+    expect(incident!.source).toBe("influxdb");
+    expect(incident!.service_name).toBe("disk");
+    expect(incident!.severity).toBe("critical");
+
+    const messages = outbox.claimPending(10);
+    expect(messages.some((m) => m.channel_id === "ch-influx")).toBe(true);
+  });
+
+  it("should create incident from Servarr Health alert", () => {
+    const alerts = normalizeServarr({
+      eventType: "Health",
+      instanceName: "Sonarr",
+      reason: "HealthCheck",
+      messages: [
+        {
+          type: "Warning",
+          message: "Some indexers are unavailable due to recent errors.",
+          source: "Indexer",
+          wikiUrl: "https://wiki.servarr.com/sonarr/health",
+          level: 1,
+        },
+      ],
+      isHealthy: false,
+      appVersion: "4.0.0.692",
+      appUrl: "http://sonarr:8989",
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].source).toBe("servarr:sonarr");
+    expect(alerts[0].source_id).toBe("servarr:sonarr:health:Indexer");
+    expect(alerts[0].severity).toBe("warning");
+    expect(alerts[0].status).toBe("firing");
+    expect(alerts[0].title).toBe("Some indexers are unavailable due to recent errors.");
+
+    const result = processAlert(alerts[0], { alertChannelId: "ch-servarr" });
+    expect(result.created).toBe(true);
+
+    const incident = incidents.getIncident(result.incidentId);
+    expect(incident!.source).toBe("servarr:sonarr");
+    expect(incident!.service_name).toBe("Sonarr");
+
+    const messages = outbox.claimPending(10);
+    expect(messages.some((m) => m.channel_id === "ch-servarr")).toBe(true);
+  });
+
+  it("should resolve incident from Servarr HealthRestored", () => {
+    // Create firing first
+    const firing = normalizeServarr({
+      eventType: "Health",
+      instanceName: "Radarr",
+      messages: [{ type: "Error", message: "Disk space low", source: "Disk", level: 2 }],
+      isHealthy: false,
+    });
+    const { incidentId } = processAlert(firing[0], { alertChannelId: "ch-servarr" });
+    outbox.claimPending(10); // drain outbox
+
+    // Now resolve
+    const resolved = normalizeServarr({
+      eventType: "HealthRestored",
+      instanceName: "Radarr",
+      messages: [{ type: "Error", message: "Disk space low", source: "Disk", level: 2 }],
+      isHealthy: true,
+    });
+    expect(resolved[0].status).toBe("resolved");
+
+    const result = processAlert(resolved[0], { alertChannelId: "ch-servarr" });
+    expect(result.created).toBe(false);
+    expect(result.incidentId).toBe(incidentId);
+
+    const incident = incidents.getIncident(incidentId);
+    expect(incident!.status).toBe("resolved");
+  });
+
+  it("should handle Servarr Health with multiple messages", () => {
+    const alerts = normalizeServarr({
+      eventType: "Health",
+      instanceName: "Prowlarr",
+      messages: [
+        { type: "Warning", message: "Indexer A failed", source: "IndexerA", level: 1 },
+        { type: "Error", message: "Indexer B failed", source: "IndexerB", level: 2 },
+      ],
+      isHealthy: false,
+    });
+    expect(alerts).toHaveLength(2);
+    expect(alerts[0].severity).toBe("warning");
+    expect(alerts[1].severity).toBe("critical");
+    expect(alerts[0].source_id).toBe("servarr:prowlarr:health:IndexerA");
+    expect(alerts[1].source_id).toBe("servarr:prowlarr:health:IndexerB");
+  });
+
+  it("should skip non-alert Servarr events (Grab, Download, etc.)", () => {
+    expect(normalizeServarr({ eventType: "Grab" })).toHaveLength(0);
+    expect(normalizeServarr({ eventType: "Download" })).toHaveLength(0);
+    expect(normalizeServarr({ eventType: "Rename" })).toHaveLength(0);
+    expect(normalizeServarr({ eventType: "MovieAdded" })).toHaveLength(0);
+    expect(normalizeServarr({ eventType: "SeriesAdd" })).toHaveLength(0);
+    expect(normalizeServarr({ eventType: "Test" })).toHaveLength(0);
+  });
+
+  it("should normalize Servarr ApplicationUpdate", () => {
+    const alerts = normalizeServarr({
+      eventType: "ApplicationUpdate",
+      instanceName: "Sonarr",
+      previousVersion: "4.0.0.690",
+      newVersion: "4.0.0.692",
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].severity).toBe("info");
+    expect(alerts[0].title).toContain("4.0.0.690");
+    expect(alerts[0].title).toContain("4.0.0.692");
+  });
+
+  it("should handle Servarr Health with no messages array", () => {
+    const alerts = normalizeServarr({
+      eventType: "Health",
+      instanceName: "Bazarr",
+      isHealthy: false,
+    });
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].title).toBe("Bazarr health issue");
+    expect(alerts[0].status).toBe("firing");
+  });
+});
+
+describe("Servarr severity mapping", () => {
+  it("should map Error/level 2 to critical", () => {
+    expect(mapServarrSeverity(2, "Error")).toBe("critical");
+    expect(mapServarrSeverity(2, undefined)).toBe("critical");
+    expect(mapServarrSeverity(undefined, "Error")).toBe("critical");
+  });
+
+  it("should map Warning/level 1 to warning", () => {
+    expect(mapServarrSeverity(1, "Warning")).toBe("warning");
+    expect(mapServarrSeverity(1, undefined)).toBe("warning");
+    expect(mapServarrSeverity(undefined, "Warning")).toBe("warning");
+  });
+
+  it("should default to info", () => {
+    expect(mapServarrSeverity(0, "Info")).toBe("info");
+    expect(mapServarrSeverity(undefined, undefined)).toBe("info");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Seerr normalizer                                                   */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeSeerr", () => {
+  beforeEach(() => {
+    cleanTables();
+  });
+
+  const mediaFailedPayload = {
+    notification_type: "MEDIA_FAILED",
+    event: "Media Failed",
+    subject: "Failed Request - The Matrix (1999)",
+    message: "The request for The Matrix (1999) has failed.",
+    media: {
+      media_type: "movie",
+      tmdbId: "603",
+      tvdbId: "",
+      status: "UNKNOWN",
+      status4k: "UNKNOWN",
+    },
+    request: {
+      request_id: "42",
+      requestedBy_username: "rubiss",
+    },
+  };
+
+  it("should normalize MEDIA_FAILED to a firing alert", () => {
+    const alerts = normalizeSeerr(mediaFailedPayload);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      source: "seerr",
+      source_id: "seerr:media-failed:603",
+      service_name: "Seerr",
+      title: "Failed Request - The Matrix (1999)",
+      severity: "warning",
+      status: "firing",
+    });
+    expect(alerts[0].metadata).toMatchObject({
+      notification_type: "MEDIA_FAILED",
+      mediaType: "movie",
+      tmdbId: "603",
+      requestedBy: "rubiss",
+    });
+  });
+
+  it("should create an incident via processAlert", () => {
+    const alerts = normalizeSeerr(mediaFailedPayload);
+    for (const alert of alerts) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const inc = incidents.findBySourceId("seerr", "seerr:media-failed:603");
+    expect(inc).toBeDefined();
+    expect(inc!.status).toBe("open");
+    expect(inc!.title).toBe("Failed Request - The Matrix (1999)");
+  });
+
+  it("should skip non-alert event types", () => {
+    const nonAlert = {
+      notification_type: "MEDIA_APPROVED",
+      event: "Media Approved",
+      subject: "Approved - Some Movie",
+      message: "Your request was approved.",
+    };
+    expect(normalizeSeerr(nonAlert)).toHaveLength(0);
+  });
+
+  it("should skip MEDIA_AVAILABLE events", () => {
+    expect(normalizeSeerr({
+      notification_type: "MEDIA_AVAILABLE",
+      event: "Media Available",
+      subject: "Available - Movie",
+      message: "Now available.",
+    })).toHaveLength(0);
+  });
+
+  it("should use request_id as fallback when no tmdbId", () => {
+    const noTmdb = {
+      notification_type: "MEDIA_FAILED",
+      event: "Media Failed",
+      subject: "Failed Request",
+      message: "Something failed.",
+      request: { request_id: "99" },
+    };
+    const alerts = normalizeSeerr(noTmdb);
+    expect(alerts[0].source_id).toBe("seerr:media-failed:99");
+  });
+
+  it("should use 'unknown' as fallback when no IDs available", () => {
+    const bare = {
+      notification_type: "MEDIA_FAILED",
+      event: "Media Failed",
+      subject: "Failed",
+      message: "Failed.",
+    };
+    const alerts = normalizeSeerr(bare);
+    expect(alerts[0].source_id).toBe("seerr:media-failed:unknown");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Uptime Kuma normalizer                                             */
+/* ------------------------------------------------------------------ */
+
+describe("normalizeUptimeKuma", () => {
+  beforeEach(() => {
+    cleanTables();
+  });
+
+  const downPayload = {
+    heartbeat: {
+      status: 0,
+      msg: "Connection failed",
+      time: "2024-06-01T12:00:00.000Z",
+      ping: undefined as number | undefined,
+      duration: 300,
+      important: true,
+    },
+    monitor: {
+      id: 7,
+      name: "Plex",
+      url: "http://plex:32400/web",
+      type: "http",
+    },
+    msg: "Plex is DOWN",
+  };
+
+  const upPayload = {
+    heartbeat: {
+      status: 1,
+      msg: "200 - OK",
+      time: "2024-06-01T12:05:00.000Z",
+      ping: 42,
+      duration: 300,
+      important: true,
+    },
+    monitor: {
+      id: 7,
+      name: "Plex",
+      url: "http://plex:32400/web",
+      type: "http",
+    },
+    msg: "Plex is UP",
+  };
+
+  it("should normalize DOWN heartbeat to a critical firing alert", () => {
+    const alerts = normalizeUptimeKuma(downPayload);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      source: "uptime-kuma",
+      source_id: "uptime-kuma:7",
+      service_name: "Plex",
+      title: "Plex is DOWN",
+      severity: "critical",
+      status: "firing",
+    });
+    expect(alerts[0].metadata).toMatchObject({
+      monitorId: 7,
+      monitorUrl: "http://plex:32400/web",
+      monitorType: "http",
+      message: "Connection failed",
+      duration: 300,
+    });
+  });
+
+  it("should normalize UP heartbeat to a resolved info alert", () => {
+    const alerts = normalizeUptimeKuma(upPayload);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({
+      source: "uptime-kuma",
+      source_id: "uptime-kuma:7",
+      service_name: "Plex",
+      title: "Plex is back UP",
+      severity: "info",
+      status: "resolved",
+    });
+  });
+
+  it("should create an incident via processAlert", () => {
+    const alerts = normalizeUptimeKuma(downPayload);
+    for (const alert of alerts) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const inc = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(inc).toBeDefined();
+    expect(inc!.status).toBe("open");
+    expect(inc!.title).toBe("Plex is DOWN");
+  });
+
+  it("should resolve incident when UP heartbeat arrives", () => {
+    // First create the incident
+    for (const alert of normalizeUptimeKuma(downPayload)) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const inc = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(inc!.status).toBe("open");
+
+    // Now resolve it
+    for (const alert of normalizeUptimeKuma(upPayload)) {
+      processAlert(alert, { alertChannelId: "test-channel" });
+    }
+    const resolved = incidents.findBySourceId("uptime-kuma", "uptime-kuma:7");
+    expect(resolved!.status).toBe("resolved");
+  });
+
+  it("should skip PENDING status (status=2)", () => {
+    const pending = {
+      heartbeat: { status: 2, msg: "Pending", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 7, name: "Plex" },
+    };
+    expect(normalizeUptimeKuma(pending)).toHaveLength(0);
+  });
+
+  it("should skip MAINTENANCE status (status=3)", () => {
+    const maint = {
+      heartbeat: { status: 3, msg: "Maintenance", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 7, name: "Plex" },
+    };
+    expect(normalizeUptimeKuma(maint)).toHaveLength(0);
+  });
+
+  it("should skip payloads with missing heartbeat or monitor", () => {
+    expect(normalizeUptimeKuma({ msg: "test" })).toHaveLength(0);
+    expect(normalizeUptimeKuma({ heartbeat: { status: 0, msg: "down", time: "now" } } as any)).toHaveLength(0);
+    expect(normalizeUptimeKuma({ monitor: { id: 1, name: "X" } } as any)).toHaveLength(0);
+  });
+
+  it("should use monitor.id for dedup source_id", () => {
+    const alerts = normalizeUptimeKuma({
+      heartbeat: { status: 0, msg: "down", time: "2024-06-01T12:00:00Z" },
+      monitor: { id: 42, name: "Sonarr" },
+    });
+    expect(alerts[0].source_id).toBe("uptime-kuma:42");
+  });
+});
