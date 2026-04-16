@@ -72,9 +72,12 @@ export class SessionManager {
   private workingDirOverrides: Map<string, string> = new Map();
   // Per-session MCP tool overrides: server name → tools array (["*"] = enabled, [] = disabled)
   private mcpToolOverrides: Map<string, Record<string, string[]>> = new Map();
+  // Default model for new sessions (overridable per-session via setModel)
+  private defaultModel: string;
 
-  constructor() {
+  constructor(options?: { defaultModel?: string }) {
     this.client = new CopilotClient();
+    this.defaultModel = options?.defaultModel ?? "claude-haiku-4.5";
   }
 
   private async getOrCreateSession(key: string): Promise<CopilotSession> {
@@ -108,9 +111,9 @@ export class SessionManager {
                 `[SessionManager] Resume failed for ${key} (${storedSessionId}), creating new session:`,
                 err
               );
-              return this.client.createSession({ model: "claude-haiku-4.5", ...sessionConfig });
+              return this.client.createSession({ model: this.defaultModel, ...sessionConfig });
             })
-        : this.client.createSession({ model: "claude-haiku-4.5", ...sessionConfig })
+        : this.client.createSession({ model: this.defaultModel, ...sessionConfig })
     ).then((session) => {
       // Guard: if resetSession removed our pending entry while we were in flight,
       // don't resurrect the session — disconnect it and skip persisting.

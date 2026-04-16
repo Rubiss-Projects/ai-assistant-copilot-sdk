@@ -5,6 +5,17 @@ import { setThreadId as setIncidentThreadId } from "../app/store/incidents.js";
 
 export interface OutboxPublisherOptions {
   pollIntervalMs?: number;
+  /** Called after an alert thread is created. Runs async — failures don't affect delivery. */
+  onAlertThreadCreated?: (threadId: string, alert: AlertThreadInfo) => Promise<void>;
+}
+
+export interface AlertThreadInfo {
+  title: string;
+  source: string;
+  service_name?: string;
+  severity?: string;
+  incidentId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export class OutboxPublisher {
@@ -13,10 +24,12 @@ export class OutboxPublisher {
   private running = false;
   private polling = false;
   private pollIntervalMs: number;
+  private onAlertThreadCreated?: (threadId: string, alert: AlertThreadInfo) => Promise<void>;
 
   constructor(client: Client, options: OutboxPublisherOptions = {}) {
     this.client = client;
     this.pollIntervalMs = options.pollIntervalMs ?? 5000;
+    this.onAlertThreadCreated = options.onAlertThreadCreated;
   }
 
   start(): void {
@@ -158,6 +171,23 @@ export class OutboxPublisher {
       if (incidentId) {
         try { setIncidentThreadId(incidentId, thread.id); } catch { /* best-effort */ }
       }
+
+      // Trigger auto-triage (fire-and-forget — failures don't affect delivery)
+      if (this.onAlertThreadCreated) {
+        const fields = Array.isArray((formatted.embeds as Array<{ fields?: Array<{ name: string; value: string }> }>)?.[0]?.fields)
+          ? (formatted.embeds as Array<{ fields: Array<{ name: string; value: string }> }>)[0].fields
+          : [];
+        const fieldValue = (name: string) => fields.find((f) => f.name === name)?.value;
+        this.onAlertThreadCreated(thread.id, {
+          title: embedTitle?.replace(/^🚨\s*/, "") ?? "Unknown Alert",
+          source: (metadata?.source as string) ?? fieldValue("Source") ?? "unknown",
+          service_name: fieldValue("Service"),
+          severity: fieldValue("Severity"),
+          incidentId,
+          metadata: metadata as Record<string, unknown> | undefined,
+        }).catch((err) => console.error("[outbox] Auto-triage callback error:", err));
+      }
+
       return;
     }
 

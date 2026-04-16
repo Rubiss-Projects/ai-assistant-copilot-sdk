@@ -5,6 +5,7 @@ import { CONFIG_DIR } from "../app/config/env.js";
 import { SessionManager } from "../app/copilot/interactiveSessions.js";
 import { createBot } from "./discordClient.js";
 import { OutboxPublisher } from "./outboxPublisher.js";
+import { triggerAutoTriage } from "./autoTriage.js";
 import { runMigrations } from "../app/store/index.js";
 import { closeDb } from "../app/store/db.js";
 import { chatCorePlugin } from "../plugins/chat-core/index.js";
@@ -33,10 +34,18 @@ export async function startBot(): Promise<void> {
     )
   );
 
-  const sessions = new SessionManager();
+  const sessions = new SessionManager({
+    defaultModel: (config.plugins["chat-core"]?.defaultModel as string) ?? undefined,
+  });
   const client = createBot(sessions);
 
-  const outbox = new OutboxPublisher(client);
+  const sreConfig = config.plugins["sre-docker-host"] ?? {};
+  const triageModel = (sreConfig.defaultModel as string) ?? "gpt-5.4";
+
+  const outbox = new OutboxPublisher(client, {
+    onAlertThreadCreated: (threadId, alert) =>
+      triggerAutoTriage(client, sessions, threadId, alert, { model: triageModel }),
+  });
 
   async function shutdown(signal: string): Promise<void> {
     console.log(`\n${signal} received — shutting down bot...`);

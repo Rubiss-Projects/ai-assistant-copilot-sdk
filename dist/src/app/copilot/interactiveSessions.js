@@ -67,8 +67,11 @@ export class SessionManager {
     workingDirOverrides = new Map();
     // Per-session MCP tool overrides: server name → tools array (["*"] = enabled, [] = disabled)
     mcpToolOverrides = new Map();
-    constructor() {
+    // Default model for new sessions (overridable per-session via setModel)
+    defaultModel;
+    constructor(options) {
         this.client = new CopilotClient();
+        this.defaultModel = options?.defaultModel ?? "claude-haiku-4.5";
     }
     async getOrCreateSession(key) {
         // Return already-established in-memory session
@@ -95,9 +98,9 @@ export class SessionManager {
                     .resumeSession(storedSessionId, sessionConfig)
                     .catch((err) => {
                     console.warn(`[SessionManager] Resume failed for ${key} (${storedSessionId}), creating new session:`, err);
-                    return this.client.createSession({ model: "claude-haiku-4.5", ...sessionConfig });
+                    return this.client.createSession({ model: this.defaultModel, ...sessionConfig });
                 })
-            : this.client.createSession({ model: "claude-haiku-4.5", ...sessionConfig })).then((session) => {
+            : this.client.createSession({ model: this.defaultModel, ...sessionConfig })).then((session) => {
             // Guard: if resetSession removed our pending entry while we were in flight,
             // don't resurrect the session — disconnect it and skip persisting.
             // The in-flight caller still gets the session for their one message, but

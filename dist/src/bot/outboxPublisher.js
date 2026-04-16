@@ -6,9 +6,11 @@ export class OutboxPublisher {
     running = false;
     polling = false;
     pollIntervalMs;
+    onAlertThreadCreated;
     constructor(client, options = {}) {
         this.client = client;
         this.pollIntervalMs = options.pollIntervalMs ?? 5000;
+        this.onAlertThreadCreated = options.onAlertThreadCreated;
     }
     start() {
         if (this.running)
@@ -143,6 +145,21 @@ export class OutboxPublisher {
                     setIncidentThreadId(incidentId, thread.id);
                 }
                 catch { /* best-effort */ }
+            }
+            // Trigger auto-triage (fire-and-forget — failures don't affect delivery)
+            if (this.onAlertThreadCreated) {
+                const fields = Array.isArray(formatted.embeds?.[0]?.fields)
+                    ? formatted.embeds[0].fields
+                    : [];
+                const fieldValue = (name) => fields.find((f) => f.name === name)?.value;
+                this.onAlertThreadCreated(thread.id, {
+                    title: embedTitle?.replace(/^🚨\s*/, "") ?? "Unknown Alert",
+                    source: metadata?.source ?? fieldValue("Source") ?? "unknown",
+                    service_name: fieldValue("Service"),
+                    severity: fieldValue("Severity"),
+                    incidentId,
+                    metadata: metadata,
+                }).catch((err) => console.error("[outbox] Auto-triage callback error:", err));
             }
             return;
         }
