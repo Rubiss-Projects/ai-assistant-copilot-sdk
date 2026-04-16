@@ -94,6 +94,12 @@ export function updateStatus(id: string, status: string): void {
   `).run(updates.status, updates.updated_at, updates.resolved_at ?? null, id);
 }
 
+export function findByThreadId(threadId: string): Incident | null {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM incidents WHERE thread_id = ?").get(threadId) as IncidentRow | undefined;
+  return row ? rowToIncident(row) : null;
+}
+
 export function setThreadId(id: string, threadId: string): void {
   const db = getDb();
   db.prepare("UPDATE incidents SET thread_id = ?, updated_at = ? WHERE id = ?").run(threadId, new Date().toISOString(), id);

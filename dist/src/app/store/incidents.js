@@ -41,6 +41,11 @@ export function updateStatus(id, status) {
     WHERE id = ?
   `).run(updates.status, updates.updated_at, updates.resolved_at ?? null, id);
 }
+export function findByThreadId(threadId) {
+    const db = getDb();
+    const row = db.prepare("SELECT * FROM incidents WHERE thread_id = ?").get(threadId);
+    return row ? rowToIncident(row) : null;
+}
 export function setThreadId(id, threadId) {
     const db = getDb();
     db.prepare("UPDATE incidents SET thread_id = ?, updated_at = ? WHERE id = ?").run(threadId, new Date().toISOString(), id);
