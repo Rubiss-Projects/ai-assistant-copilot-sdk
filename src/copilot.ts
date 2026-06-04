@@ -2,6 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { CopilotClient, CopilotSession, MCPServerConfig, approveAll } from "@github/copilot-sdk";
+import type { SessionEvent } from "@github/copilot-sdk";
 
 const DISCORD_MAX = 1990; // Leave headroom for code-fence close/reopen overhead
 
@@ -392,8 +393,8 @@ export class SessionManager {
     return { status, authStatus };
   }
 
-  async getHistory(userId: string) {
-    return this.withExistingLiveSession(userId, (session) => session.getMessages());
+  async getHistory(userId: string): Promise<SessionEvent[] | null> {
+    return this.withExistingLiveSession(userId, (session) => session.getEvents());
   }
 
   async listModels() {
