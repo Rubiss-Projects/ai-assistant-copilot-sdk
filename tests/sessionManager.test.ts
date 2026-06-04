@@ -7,7 +7,7 @@ type AssistantResult = { data: { content: string } };
 type SessionLike = {
   sessionId: string;
   sendAndWait?: (options: unknown, timeout?: number) => Promise<AssistantResult>;
-  getMessages?: () => Promise<unknown[]>;
+  getEvents?: () => Promise<unknown[]>;
   rpc?: {
     model: {
       getCurrent: () => Promise<{ modelId?: string }>;

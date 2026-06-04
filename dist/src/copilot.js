@@ -334,7 +334,7 @@ export class SessionManager {
         return { status, authStatus };
     }
     async getHistory(userId) {
-        return this.withExistingLiveSession(userId, (session) => session.getMessages());
+        return this.withExistingLiveSession(userId, (session) => session.getEvents());
     }
     async listModels() {
         await this.client.start(); // listModels() requires an active connection; start() is idempotent
